@@ -22,12 +22,13 @@ import java.net._
 import java.nio.charset.StandardCharsets
 import java.nio.charset.StandardCharsets.UTF_8
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.{List => JList, Map => JMap}
+import java.util.{Map => JMap}
 
 import org.apache.spark._
 import org.apache.spark.sql.SparkUtils
 import tech.mlsql.arrow.Utils
 import tech.mlsql.arrow.python.PythonWorkerFactory
+import tech.mlsql.common.utils.lang.sc.ScalaMethodMacros.str
 import tech.mlsql.common.utils.log.Logging
 
 import scala.collection.JavaConverters._
@@ -35,15 +36,15 @@ import scala.util.control.NonFatal
 
 object PythonConf {
   val BUFFER_SIZE = "buffer_size"
-  val PYTHON_WORKER_REUSE = "python_worker_reuse"
+  val PY_WORKER_REUSE = "py_worker_reuse"
   val PY_EXECUTOR_MEMORY = "py_executor_memory"
   val EXECUTOR_CORES = "executor_cores"
+  val PYTHON_ENV = "python_env"
 }
 
 case class PythonFunction(
-                           command: Array[Byte],
+                           command: String,
                            envVars: JMap[String, String],
-                           pythonIncludes: JList[String],
                            pythonExec: String,
                            pythonVer: String)
 
@@ -51,18 +52,15 @@ case class ChainedPythonFunctions(funcs: Seq[PythonFunction])
 
 abstract class BasePythonRunner[IN, OUT](
                                           funcs: Seq[ChainedPythonFunctions],
-                                          evalType: Int,
-                                          argOffsets: Array[Array[Int]],
                                           conf: Map[String, String]
                                         )
   extends Logging {
 
   import PythonConf._
 
-  require(funcs.length == argOffsets.length, "argOffsets should have the same length as funcs")
 
   protected val bufferSize: Int = conf.getOrElse(BUFFER_SIZE, "65536").toInt
-  private val reuseWorker = conf.getOrElse(PYTHON_WORKER_REUSE, "true").toBoolean
+  private val reuseWorker = conf.getOrElse(PY_WORKER_REUSE, "true").toBoolean
   // each python worker gets an equal part of the allocation. the worker pool will grow to the
   // number of concurrent tasks, which is determined by the number of cores in this executor.
   private val memoryMb = conf.get(PY_EXECUTOR_MEMORY).map(_.toInt / conf.getOrElse(EXECUTOR_CORES, "1").toInt)
@@ -74,7 +72,7 @@ abstract class BasePythonRunner[IN, OUT](
 
 
   // Expose a ServerSocket to support method calls via socket from Python side.
-  private[spark] var serverSocket: Option[ServerSocket] = None
+  var serverSocket: Option[ServerSocket] = None
 
 
   def compute(
@@ -84,12 +82,12 @@ abstract class BasePythonRunner[IN, OUT](
     val startTime = System.currentTimeMillis
 
     if (reuseWorker) {
-      envVars.put("PYTHON_REUSE_WORKER", "1")
+      envVars.put(str(PY_WORKER_REUSE), "1")
     }
     if (memoryMb.isDefined) {
-      envVars.put("PY_EXECUTOR_MEMORY_MB", memoryMb.get.toString)
+      envVars.put(str(PY_EXECUTOR_MEMORY), memoryMb.get.toString)
     }
-    envVars.put("BUFFER_SIZE", bufferSize.toString)
+    envVars.put(str(BUFFER_SIZE), bufferSize.toString)
     val worker: Socket = PythonWorkerFactory.createPythonWorker(pythonExec, envVars.asScala.toMap, conf)
     // Whether is the worker released into idle pool or closed. When any codes try to release or
     // close a worker, they should use `releasedOrClosed.compareAndSet` to flip the state to make
@@ -239,12 +237,13 @@ abstract class BasePythonRunner[IN, OUT](
         } else if (isBarrier) {
           logDebug(s"Started ServerSocket on port $boundPort.")
         }
-        // Write out the TaskContextInfo
+
+        // all information we will write
+        // Notice that we should in python side get these information 
         dataOut.writeBoolean(isBarrier)
         dataOut.writeInt(boundPort)
         writeCommand(dataOut)
         writeIteratorToStream(dataOut)
-
         dataOut.writeInt(SpecialLengths.END_OF_STREAM)
         dataOut.flush()
       } catch {
@@ -341,6 +340,13 @@ abstract class BasePythonRunner[IN, OUT](
         writerThread.exception.getOrElse(null))
     }
 
+    protected def handleEndOfStream(): Unit = {
+      if (reuseWorker && releasedOrClosed.compareAndSet(false, true)) {
+        PythonWorkerFactory.releasePythonWorker(pythonExec, envVars.asScala.toMap, worker)
+      }
+      eos = true
+    }
+
     protected def handleEndOfDataSection(): Unit = {
 
       if (stream.readInt() == SpecialLengths.END_OF_STREAM) {
@@ -354,7 +360,7 @@ abstract class BasePythonRunner[IN, OUT](
     protected val handleException: PartialFunction[Throwable, OUT] = {
       case e: Exception if context.isInterrupted =>
         logDebug("Exception thrown after task interruption", e)
-        throw new TaskKilledException(context.getKillReason().getOrElse("unknown reason"))
+        throw new TaskKilledException(SparkUtils.getKillReason(context).getOrElse("unknown reason"))
 
       case e: Exception if writerThread.exception.isDefined =>
         logError("Python worker exited unexpectedly (crashed)", e)
@@ -415,7 +421,7 @@ object SpecialLengths {
   val START_ARROW_STREAM = -6
 }
 
-private[spark] object BarrierTaskContextMessageProtocol {
+object BarrierTaskContextMessageProtocol {
   val BARRIER_FUNCTION = 1
   val BARRIER_RESULT_SUCCESS = "success"
   val ERROR_UNRECOGNIZED_FUNCTION = "Not recognized function call from python side."

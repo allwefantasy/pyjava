@@ -19,11 +19,12 @@ package tech.mlsql.arrow
 
 import org.apache.arrow.vector._
 import org.apache.arrow.vector.complex._
-
-import scala.collection.JavaConverters._
-import org.apache.spark.sql.types._
+import org.apache.spark.sql.SparkUtils
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.SpecializedGetters
+import org.apache.spark.sql.types._
+
+import scala.collection.JavaConverters._
 
 object ArrowWriter {
 
@@ -43,6 +44,12 @@ object ArrowWriter {
 
   private def createFieldWriter(vector: ValueVector): ArrowFieldWriter = {
     val field = vector.getField()
+    val fixDecimalOpt = SparkUtils.isFixDecimal(ArrowUtils.fromArrowField(field))
+    (fixDecimalOpt, vector) match {
+      case (Some(i), vector: DecimalVector) => return new DecimalWriter(vector, i.getPrecision, i.getScale)
+      case (None, _) =>
+    }
+
     (ArrowUtils.fromArrowField(field), vector) match {
       case (BooleanType, vector: BitVector) => new BooleanWriter(vector)
       case (ByteType, vector: TinyIntVector) => new ByteWriter(vector)
@@ -51,8 +58,6 @@ object ArrowWriter {
       case (LongType, vector: BigIntVector) => new LongWriter(vector)
       case (FloatType, vector: Float4Vector) => new FloatWriter(vector)
       case (DoubleType, vector: Float8Vector) => new DoubleWriter(vector)
-      case (DecimalType.Fixed(precision, scale), vector: DecimalVector) =>
-        new DecimalWriter(vector, precision, scale)
       case (StringType, vector: VarCharVector) => new StringWriter(vector)
       case (BinaryType, vector: VarBinaryVector) => new BinaryWriter(vector)
       case (DateType, vector: DateDayVector) => new DateWriter(vector)
@@ -105,10 +110,13 @@ private[arrow] abstract class ArrowFieldWriter {
   def valueVector: ValueVector
 
   def name: String = valueVector.getField().getName()
+
   def dataType: DataType = ArrowUtils.fromArrowField(valueVector.getField())
+
   def nullable: Boolean = valueVector.getField().isNullable()
 
   def setNull(): Unit
+
   def setValue(input: SpecializedGetters, ordinal: Int): Unit
 
   private[arrow] var count: Int = 0
@@ -210,9 +218,9 @@ private[arrow] class DoubleWriter(val valueVector: Float8Vector) extends ArrowFi
 }
 
 private[arrow] class DecimalWriter(
-    val valueVector: DecimalVector,
-    precision: Int,
-    scale: Int) extends ArrowFieldWriter {
+                                    val valueVector: DecimalVector,
+                                    precision: Int,
+                                    scale: Int) extends ArrowFieldWriter {
 
   override def setNull(): Unit = {
     valueVector.setNull(count)
@@ -243,7 +251,7 @@ private[arrow] class StringWriter(val valueVector: VarCharVector) extends ArrowF
 }
 
 private[arrow] class BinaryWriter(
-    val valueVector: VarBinaryVector) extends ArrowFieldWriter {
+                                   val valueVector: VarBinaryVector) extends ArrowFieldWriter {
 
   override def setNull(): Unit = {
     valueVector.setNull(count)
@@ -267,7 +275,7 @@ private[arrow] class DateWriter(val valueVector: DateDayVector) extends ArrowFie
 }
 
 private[arrow] class TimestampWriter(
-    val valueVector: TimeStampMicroTZVector) extends ArrowFieldWriter {
+                                      val valueVector: TimeStampMicroTZVector) extends ArrowFieldWriter {
 
   override def setNull(): Unit = {
     valueVector.setNull(count)
@@ -279,8 +287,8 @@ private[arrow] class TimestampWriter(
 }
 
 private[arrow] class ArrayWriter(
-    val valueVector: ListVector,
-    val elementWriter: ArrowFieldWriter) extends ArrowFieldWriter {
+                                  val valueVector: ListVector,
+                                  val elementWriter: ArrowFieldWriter) extends ArrowFieldWriter {
 
   override def setNull(): Unit = {
   }
@@ -308,8 +316,8 @@ private[arrow] class ArrayWriter(
 }
 
 private[arrow] class StructWriter(
-    val valueVector: StructVector,
-    children: Array[ArrowFieldWriter]) extends ArrowFieldWriter {
+                                   val valueVector: StructVector,
+                                   children: Array[ArrowFieldWriter]) extends ArrowFieldWriter {
 
   override def setNull(): Unit = {
     var i = 0

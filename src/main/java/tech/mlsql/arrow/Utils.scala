@@ -3,7 +3,6 @@ package tech.mlsql.arrow
 import java.io.{Closeable, IOException, InputStream, OutputStream}
 import java.util.concurrent.TimeUnit
 
-import org.apache.spark.util.Utils.logError
 import tech.mlsql.common.utils.log.Logging
 
 import scala.io.Source

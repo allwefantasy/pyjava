@@ -12,6 +12,8 @@ import java.util.concurrent.TimeUnit
 import javax.annotation.concurrent.GuardedBy
 import tech.mlsql.arrow.Utils
 import tech.mlsql.arrow.Utils.RedirectThread
+import tech.mlsql.arrow.python.ispark.PythonConf
+import tech.mlsql.common.utils.lang.sc.ScalaMethodMacros
 import tech.mlsql.common.utils.log.Logging
 
 import scala.collection.JavaConverters._
@@ -165,8 +167,9 @@ class PythonWorkerFactory(pythonExec: String, envVars: Map[String, String], conf
 
       try {
         // Create and start the daemon
-        val command = Arrays.asList(pythonExec, "-m", daemonModule)
-        val pb = new ProcessBuilder(command)
+        val envCommand = envVars.get(ScalaMethodMacros.str(PythonConf.PYTHON_ENV)).getOrElse("")
+        val command = Seq("bash", "-c", envCommand + s" &&  python -m ${daemonModule}")
+        val pb = new ProcessBuilder(command.asJava)
         val workerEnv = pb.environment()
         workerEnv.putAll(envVars.asJava)
         workerEnv.put("PYTHONPATH", pythonPath)
@@ -191,7 +194,7 @@ class PythonWorkerFactory(pythonExec: String, envVars: Map[String, String], conf
                |Bad data in $daemonModule's standard output. Invalid port number:
                |  $daemonPort (0x$daemonPort%08x)
                |Python command to execute the daemon was:
-               |  ${command.asScala.mkString(" ")}
+               |  ${command.mkString(" ")}
                |Check that you don't have any unexpected modules or libraries in
                |your PYTHONPATH:
                |  $pythonPath

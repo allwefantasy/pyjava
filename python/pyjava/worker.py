@@ -17,9 +17,7 @@
 
 from __future__ import print_function
 
-import os
-import sys
-import time
+from pyjava.api.mlsql import Data
 from pyjava.utils import *
 
 # 'resource' is a Unix specific module.
@@ -30,8 +28,11 @@ except ImportError:
     has_resource_module = False
 import traceback
 
-from pyjava.serializers import write_with_length, write_int, read_int, SpecialLengths, UTF8Deserializer, \
-    PickleSerializer
+from pyjava.serializers import \
+    write_with_length, \
+    write_int, \
+    read_int, read_bool, SpecialLengths, UTF8Deserializer, \
+    PickleSerializer, ArrowStreamPandasSerializer, ArrowStreamSerializer
 
 if sys.version >= '3':
     basestring = str
@@ -43,7 +44,7 @@ utf8_deserializer = UTF8Deserializer()
 
 
 def read_command(serializer, file):
-    command = serializer._read_with_length(file)
+    command = serializer.load_stream(file)
     return command
 
 
@@ -54,21 +55,8 @@ def chain(f, g):
 
 def main(infile, outfile):
     try:
-        boot_time = time.time()
-        split_index = read_int(infile)
-        if split_index == -1:  # for unit tests
-            sys.exit(-1)
-
-        version = utf8_deserializer.loads(infile)
-        if version != "%d.%d" % sys.version_info[:2]:
-            raise Exception(("Python in worker has different version %s than that in " +
-                             "driver %s, PySpark cannot run with different minor versions." +
-                             "Please check environment variables PYSPARK_PYTHON and " +
-                             "PYSPARK_DRIVER_PYTHON are correctly set.") %
-                            ("%d.%d" % sys.version_info[:2], version))
-
         # set up memory limits
-        memory_limit_mb = int(os.environ.get('PYSPARK_EXECUTOR_MEMORY_MB', "-1"))
+        memory_limit_mb = int(os.environ.get('PY_EXECUTOR_MEMORY', "-1"))
         if memory_limit_mb > 0 and has_resource_module:
             total_memory = resource.RLIMIT_AS
             try:
@@ -88,21 +76,34 @@ def main(infile, outfile):
                 # not all systems support resource limits, so warn instead of failing
                 print("WARN: Failed to set memory limit: {0}\n".format(e), file=sys.stderr)
 
-        func, profiler, deserializer, serializer = read_command(pickleSer, infile)
+        split_index = read_int(infile)
+        if split_index == -1:  # for unit tests
+            sys.exit(-1)
+
+        is_barrier = read_bool(infile)
+        bound_port = read_int(infile)
+
+        command = utf8_deserializer.loads(infile)
+        ser = ArrowStreamSerializer()
+        out_ser = ArrowStreamPandasSerializer(None, True, True)
 
         def process():
-            iterator = deserializer.load_stream(infile)
-            out_iter = func(split_index, iterator)
+            inpu_data = ser.load_stream(infile)
+            data = Data(inpu_data)
+            code = compile(command, '<string>', 'exec')
+            global_p = {}
+            local_p = {"input_data": data}
+            exec(code, global_p, local_p)
+            out_iter = data.output_data
             try:
-                serializer.dump_stream(out_iter, outfile)
+                write_int(SpecialLengths.START_ARROW_STREAM, outfile)
+                out_ser.dump_stream(out_iter, outfile)
             finally:
                 if hasattr(out_iter, 'close'):
                     out_iter.close()
 
-        if profiler:
-            profiler.profile(process)
-        else:
-            process()
+        process()
+
     except Exception:
         try:
             write_int(SpecialLengths.PYTHON_EXCEPTION_THROWN, outfile)
@@ -112,7 +113,7 @@ def main(infile, outfile):
             pass
         except Exception:
             # Write the error to stderr if it happened while serializing
-            print("PySpark worker failed with exception:", file=sys.stderr)
+            print("Py worker failed with exception:", file=sys.stderr)
             print(traceback.format_exc(), file=sys.stderr)
         sys.exit(-1)
 
@@ -127,6 +128,5 @@ def main(infile, outfile):
 if __name__ == '__main__':
     # Read information about how to connect back to the JVM from the environment.
     java_port = int(os.environ["PYTHON_WORKER_FACTORY_PORT"])
-    auth_secret = os.environ["PYTHON_WORKER_FACTORY_SECRET"]
-    (sock_file, _) = local_connect_and_auth(java_port, auth_secret)
+    (sock_file, _) = local_connect_and_auth(java_port)
     main(sock_file, sock_file)

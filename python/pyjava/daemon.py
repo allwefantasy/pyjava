@@ -40,7 +40,7 @@ def compute_real_exit_code(exit_code):
         return 1
 
 
-def worker(sock, authenticated):
+def worker(sock):
     """
     Called by a worker process after the fork().
     """
@@ -57,17 +57,6 @@ def worker(sock, authenticated):
     buffer_size = int(os.environ.get("SPARK_BUFFER_SIZE", 65536))
     infile = os.fdopen(os.dup(sock.fileno()), "rb", buffer_size)
     outfile = os.fdopen(os.dup(sock.fileno()), "wb", buffer_size)
-
-    if not authenticated:
-        client_secret = UTF8Deserializer().loads(infile)
-        if os.environ["PYTHON_WORKER_FACTORY_SECRET"] == client_secret:
-            write_with_length("ok".encode("utf-8"), outfile)
-            outfile.flush()
-        else:
-            write_with_length("err".encode("utf-8"), outfile)
-            outfile.flush()
-            sock.close()
-            return 1
 
     exit_code = 0
     try:
@@ -183,7 +172,7 @@ def manager():
                         outfile.close()
                         authenticated = False
                         while True:
-                            code = worker(sock, authenticated)
+                            code = worker(sock)
                             if code == 0:
                                 authenticated = True
                             if not reuse or code:

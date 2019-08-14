@@ -1,2 +1,7 @@
 .idea/
 pyjava.iml
+python/build/
+python/dist/
+python/pyjava.egg-info/
+target/
+python/.eggs/

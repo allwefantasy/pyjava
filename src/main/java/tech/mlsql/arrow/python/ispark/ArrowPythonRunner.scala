@@ -21,13 +21,11 @@ import scala.collection.JavaConverters._
   */
 class ArrowPythonRunner(
                          funcs: Seq[ChainedPythonFunctions],
-                         evalType: Int,
-                         argOffsets: Array[Array[Int]],
                          schema: StructType,
                          timeZoneId: String,
                          conf: Map[String, String])
   extends BasePythonRunner[Iterator[InternalRow], ColumnarBatch](
-    funcs, evalType, argOffsets, conf) {
+    funcs, conf) {
 
   def writeUTF(str: String, dataOut: DataOutputStream) {
     val bytes = str.getBytes(StandardCharsets.UTF_8)
@@ -46,11 +44,13 @@ class ArrowPythonRunner(
       protected override def writeCommand(dataOut: DataOutputStream): Unit = {
 
         // Write config for the worker as a number of key -> value pairs of strings
-        dataOut.writeInt(conf.size)
-        for ((k, v) <- conf) {
-          writeUTF(k, dataOut)
-          writeUTF(v, dataOut)
-        }
+        //        dataOut.writeInt(conf.size)
+        //        for ((k, v) <- conf) {
+        //          writeUTF(k, dataOut)
+        //          writeUTF(v, dataOut)
+        //        }
+        val command = funcs.head.funcs.head.command
+        writeUTF(command, dataOut)
 
       }
 
@@ -154,6 +154,10 @@ class ArrowPythonRunner(
                 read()
               case SpecialLengths.PYTHON_EXCEPTION_THROWN =>
                 throw handlePythonException()
+              case SpecialLengths.END_OF_STREAM =>
+                handleEndOfStream()
+                null
+
               case SpecialLengths.END_OF_DATA_SECTION =>
                 handleEndOfDataSection()
                 null

@@ -39,7 +39,7 @@ import scala.collection.JavaConverters._
 /**
   * Writes serialized ArrowRecordBatches to a DataOutputStream in the Arrow stream format.
   */
-private[sql] class ArrowBatchStreamWriter(
+class ArrowBatchStreamWriter(
                                            schema: StructType,
                                            out: OutputStream,
                                            timeZoneId: String) {
@@ -65,13 +65,13 @@ private[sql] class ArrowBatchStreamWriter(
   }
 }
 
-private[sql] object ArrowConverters {
+object ArrowConverters {
 
   /**
     * Maps Iterator from InternalRow to serialized ArrowRecordBatches. Limit ArrowRecordBatch size
     * in a batch by setting maxRecordsPerBatch or use 0 to fully consume rowIter.
     */
-  private[sql] def toBatchIterator(
+  def toBatchIterator(
                                     rowIter: Iterator[InternalRow],
                                     schema: StructType,
                                     maxRecordsPerBatch: Int,
@@ -126,7 +126,7 @@ private[sql] object ArrowConverters {
   /**
     * Maps iterator from serialized ArrowRecordBatches to InternalRows.
     */
-  private[sql] def fromBatchIterator(
+  def fromBatchIterator(
                                       arrowBatchIter: Iterator[Array[Byte]],
                                       schema: StructType,
                                       timeZoneId: String,
@@ -178,7 +178,7 @@ private[sql] object ArrowConverters {
   /**
     * Load a serialized ArrowRecordBatch.
     */
-  private[arrow] def loadBatch(
+  def loadBatch(
                                 batchBytes: Array[Byte],
                                 allocator: BufferAllocator): ArrowRecordBatch = {
     val in = new ByteArrayInputStream(batchBytes)
@@ -189,7 +189,7 @@ private[sql] object ArrowConverters {
   /**
     * Create a DataFrame from an RDD of serialized ArrowRecordBatches.
     */
-  private[sql] def toDataFrame(
+  def toDataFrame(
                                 arrowBatchRDD: JavaRDD[Array[Byte]],
                                 schemaString: String,
                                 sqlContext: SQLContext): DataFrame = {
@@ -205,7 +205,7 @@ private[sql] object ArrowConverters {
   /**
     * Read a file as an Arrow stream and parallelize as an RDD of serialized ArrowRecordBatches.
     */
-  private[sql] def readArrowStreamFromFile(
+  def readArrowStreamFromFile(
                                             sqlContext: SQLContext,
                                             filename: String): JavaRDD[Array[Byte]] = {
     Utils.tryWithResource(new FileInputStream(filename)) { fileStream =>
@@ -219,7 +219,7 @@ private[sql] object ArrowConverters {
   /**
     * Read an Arrow stream input and return an iterator of serialized ArrowRecordBatches.
     */
-  private[sql] def getBatchesFromStream(in: ReadableByteChannel): Iterator[Array[Byte]] = {
+  def getBatchesFromStream(in: ReadableByteChannel): Iterator[Array[Byte]] = {
 
     // Iterate over the serialized Arrow RecordBatch messages from a stream
     new Iterator[Array[Byte]] {

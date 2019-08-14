@@ -85,7 +85,7 @@ def _do_server_auth(conn, auth_secret):
         raise Exception("Unexpected reply from iterator server.")
 
 
-def local_connect_and_auth(port, auth_secret):
+def local_connect_and_auth(port):
     """
     Connect to local host, authenticate with it, and return a (sockfile,sock) for that connection.
     Handles IPV4 & IPV6, does some error handling.
@@ -104,8 +104,7 @@ def local_connect_and_auth(port, auth_secret):
             sock = socket.socket(af, socktype, proto)
             sock.settimeout(15)
             sock.connect(sa)
-            sockfile = sock.makefile("rwb", int(os.environ.get("SPARK_BUFFER_SIZE", 65536)))
-            _do_server_auth(sockfile, auth_secret)
+            sockfile = sock.makefile("rwb", int(os.environ.get("BUFFER_SIZE", 65536)))
             return (sockfile, sock)
         except socket.error as e:
             emsg = _exception_message(e)

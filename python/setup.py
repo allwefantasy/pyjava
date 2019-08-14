@@ -60,7 +60,7 @@ try:
         author='allwefantasy',
         author_email='allwefantasy@gmail.com',
         url='https://github.com/allwefantasy/pyjava',
-        packages=['pyjava'],
+        packages=['pyjava', 'pyjava.api', 'pyjava.api', 'pyjava.datatype'],
         include_package_data=True,
         package_dir={
             'pyjava.sbin': 'deps/sbin'
