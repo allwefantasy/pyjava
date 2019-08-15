@@ -9,7 +9,7 @@ finally return back.
 The initial code in this lib is from Apache Spark.
 
 
-## Used In Spark
+## Example In Spark
 
 ## Example In MLSQL
 
