@@ -15,3 +15,4 @@ The initial code in this lib is from Apache Spark.
 
 ## Example In Normal Java/Scala Application
 
+## How to configure python worker runs in Docker
