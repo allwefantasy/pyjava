@@ -44,11 +44,11 @@ class ArrowPythonRunner(
       protected override def writeCommand(dataOut: DataOutputStream): Unit = {
 
         // Write config for the worker as a number of key -> value pairs of strings
-        //        dataOut.writeInt(conf.size)
-        //        for ((k, v) <- conf) {
-        //          writeUTF(k, dataOut)
-        //          writeUTF(v, dataOut)
-        //        }
+        dataOut.writeInt(conf.size)
+        for ((k, v) <- conf) {
+          writeUTF(k, dataOut)
+          writeUTF(v, dataOut)
+        }
         val command = funcs.head.funcs.head.command
         writeUTF(command, dataOut)
 

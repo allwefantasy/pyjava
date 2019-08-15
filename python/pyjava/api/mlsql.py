@@ -1,8 +1,9 @@
 class Data(object):
 
-    def __init__(self, iterator):
+    def __init__(self, iterator, conf):
         self.input_data = iterator
         self.output_data = None
+        self.conf = conf
         self.schema = ""
 
     def set_output(self, value, schema=""):

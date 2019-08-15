@@ -84,13 +84,19 @@ def main(infile, outfile):
         is_barrier = read_bool(infile)
         bound_port = read_int(infile)
 
+        conf = {}
+        for i in range(read_int(infile)):
+            k = utf8_deserializer.loads(infile)
+            v = utf8_deserializer.loads(infile)
+            conf[k] = v
+
         command = utf8_deserializer.loads(infile)
         ser = ArrowStreamSerializer()
         out_ser = ArrowStreamPandasSerializer(None, True, True)
 
         def process():
             inpu_data = ser.load_stream(infile)
-            data = Data(inpu_data)
+            data = Data(inpu_data,conf)
             code = compile(command, '<string>', 'exec')
             global_p = {}
             local_p = {"data_manager": data}
