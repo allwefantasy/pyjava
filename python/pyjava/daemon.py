@@ -99,7 +99,7 @@ def manager():
     signal.signal(SIGHUP, SIG_IGN)  # Don't die on SIGHUP
     signal.signal(SIGCHLD, SIG_IGN)
 
-    reuse = os.environ.get("SPARK_REUSE_WORKER")
+    reuse = os.environ.get("PY_WORKER_REUSE")
 
     # Initialization complete
     try:
@@ -170,11 +170,8 @@ def manager():
                         write_int(os.getpid(), outfile)
                         outfile.flush()
                         outfile.close()
-                        authenticated = False
                         while True:
                             code = worker(sock)
-                            if code == 0:
-                                authenticated = True
                             if not reuse or code:
                                 # wait for closing
                                 try:

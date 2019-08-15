@@ -69,7 +69,7 @@ class PythonWorkerFactory(pythonExec: String, envVars: Map[String, String], conf
     sys.env.getOrElse("PYTHONPATH", ""))
 
   def create(): Socket = {
-    if (useDaemon) {
+   val socket =  if (useDaemon) {
       self.synchronized {
         if (idleWorkers.nonEmpty) {
           return idleWorkers.dequeue()
@@ -79,6 +79,7 @@ class PythonWorkerFactory(pythonExec: String, envVars: Map[String, String], conf
     } else {
       createSimpleWorker()
     }
+    socket
   }
 
   /**

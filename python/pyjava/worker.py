@@ -77,6 +77,7 @@ def main(infile, outfile):
                 print("WARN: Failed to set memory limit: {0}\n".format(e), file=sys.stderr)
 
         split_index = read_int(infile)
+        print("split_index:%s" % split_index)
         if split_index == -1:  # for unit tests
             sys.exit(-1)
 
@@ -92,9 +93,9 @@ def main(infile, outfile):
             data = Data(inpu_data)
             code = compile(command, '<string>', 'exec')
             global_p = {}
-            local_p = {"input_data": data}
+            local_p = {"data_manager": data}
             exec(code, global_p, local_p)
-            out_iter = data.output_data
+            out_iter = data.output()
             try:
                 write_int(SpecialLengths.START_ARROW_STREAM, outfile)
                 out_ser.dump_stream(out_iter, outfile)
@@ -117,7 +118,9 @@ def main(infile, outfile):
             print(traceback.format_exc(), file=sys.stderr)
         sys.exit(-1)
 
-    if read_int(infile) == SpecialLengths.END_OF_STREAM:
+    write_int(SpecialLengths.END_OF_DATA_SECTION, outfile)
+    flag = read_int(infile)
+    if flag == SpecialLengths.END_OF_STREAM:
         write_int(SpecialLengths.END_OF_STREAM, outfile)
     else:
         # write a different value to tell JVM to not reuse this worker

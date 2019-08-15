@@ -18,13 +18,12 @@
 
 from __future__ import print_function
 
-import os
 import sys
 
 from setuptools import setup
 
 if sys.version_info < (3, 6):
-    print("Python versions prior to 2.7 are not supported for pip installed PySpark.",
+    print("Python versions prior to 2.7 are not supported for pip installed pyjava.",
           file=sys.stderr)
     sys.exit(-1)
 
@@ -37,7 +36,6 @@ except IOError:
 VERSION = __version__  # noqa
 # A temporary path so we can access above the Python project root and fetch scripts and jars we need
 TEMP_PATH = "deps"
-SPARK_HOME = os.path.abspath("../")
 
 # Provide guidance about how to use setup.py
 incorrect_invocation_message = """
@@ -60,23 +58,18 @@ try:
         author='allwefantasy',
         author_email='allwefantasy@gmail.com',
         url='https://github.com/allwefantasy/pyjava',
-        packages=['pyjava', 'pyjava.api', 'pyjava.api', 'pyjava.datatype'],
+        packages=['pyjava', 'pyjava.api', 'pyjava.datatype'],
         include_package_data=True,
         package_dir={
             'pyjava.sbin': 'deps/sbin'
         },
         package_data={
-
-            'pyspark.sbin': ['spark-config.sh', 'spark-daemon.sh',
-                             'start-history-server.sh',
-                             'stop-history-server.sh', ]},
+            'pyjava.sbin': []},
         license='http://www.apache.org/licenses/LICENSE-2.0',
         install_requires=['py4j==0.10.8.1'],
         setup_requires=['pypandoc'],
         extras_require={
-            'ml': ['numpy>=1.7'],
-            'mllib': ['numpy>=1.7'],
-            'sql': [
+            'pyjava': [
                 'pandas>=%s' % _minimum_pandas_version,
                 'pyarrow>=%s' % _minimum_pyarrow_version,
             ]

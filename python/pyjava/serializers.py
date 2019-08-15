@@ -50,27 +50,27 @@ which contains two batches of two objects:
 >>> sc.stop()
 """
 
-import sys
-from itertools import chain, product
+import collections
+import itertools
 import marshal
 import struct
+import sys
 import types
-import collections
 import zlib
-import itertools
+from itertools import chain, product
 
 if sys.version < '3':
     import cPickle as pickle
     from itertools import izip as zip, imap as map
 else:
     import pickle
+
     basestring = unicode = str
     xrange = range
 pickle_protocol = pickle.HIGHEST_PROTOCOL
 
 from pyspark import cloudpickle
 from pyspark.util import _exception_message
-
 
 __all__ = ["PickleSerializer", "MarshalSerializer", "UTF8Deserializer"]
 
@@ -82,6 +82,7 @@ class SpecialLengths(object):
     END_OF_STREAM = -4
     NULL = -5
     START_ARROW_STREAM = -6
+    READ_SCHEMA = -7
 
 
 class Serializer(object):
@@ -126,7 +127,6 @@ class Serializer(object):
 
 
 class FramedSerializer(Serializer):
-
     """
     Serializer that writes objects as a stream of (length, data) pairs,
     where `length` is a 32-bit integer and data is `length` bytes.
@@ -291,7 +291,7 @@ class ArrowStreamPandasSerializer(ArrowStreamSerializer):
                 (len(series) == 2 and isinstance(series[1], pa.DataType)):
             series = [series]
         series = ((s, None) if not isinstance(s, (list, tuple)) else s for s in series)
-
+        print(series)
         def create_array(s, t):
             mask = s.isnull()
             # Ensure timestamp series are in expected form for Spark internal representation
@@ -332,7 +332,6 @@ class ArrowStreamPandasSerializer(ArrowStreamSerializer):
                 arrs.append(pa.StructArray.from_arrays(struct_arrs, struct_names))
             else:
                 arrs.append(create_array(s, t))
-
         return pa.RecordBatch.from_arrays(arrs, ["_%d" % i for i in xrange(len(arrs))])
 
     def dump_stream(self, iterator, stream):
@@ -372,7 +371,7 @@ class ArrowStreamPandasUDFSerializer(ArrowStreamPandasSerializer):
         if self._df_for_struct and types.is_struct(arrow_column.type):
             import pandas as pd
             series = [super(ArrowStreamPandasUDFSerializer, self).arrow_to_pandas(column)
-                      .rename(field.name)
+                          .rename(field.name)
                       for column, field in zip(arrow_column.flatten(), arrow_column.type)]
             s = pd.concat(series, axis=1)
         else:
@@ -402,7 +401,6 @@ class ArrowStreamPandasUDFSerializer(ArrowStreamPandasSerializer):
 
 
 class BatchedSerializer(Serializer):
-
     """
     Serializes a stream of objects in batches by calling its wrapped
     Serializer with streams of objects.
@@ -449,12 +447,12 @@ class BatchedSerializer(Serializer):
 
 
 class FlattenedValuesSerializer(BatchedSerializer):
-
     """
     Serializes a stream of list of pairs, split the list of values
     which contain more than a certain number of objects to make them
     have similar sizes.
     """
+
     def __init__(self, serializer, batchSize=10):
         BatchedSerializer.__init__(self, serializer, batchSize)
 
@@ -503,7 +501,6 @@ class AutoBatchedSerializer(BatchedSerializer):
 
 
 class CartesianDeserializer(Serializer):
-
     """
     Deserializes the JavaRDD cartesian() of two PythonRDDs.
     Due to pyspark batching we cannot simply use the result of the Java RDD cartesian,
@@ -530,7 +527,6 @@ class CartesianDeserializer(Serializer):
 
 
 class PairDeserializer(Serializer):
-
     """
     Deserializes the JavaRDD zip() of two PythonRDDs.
     Due to pyspark batching we cannot simply use the result of the Java RDD zip,
@@ -593,6 +589,7 @@ def _hack_namedtuple(cls):
 
     def __reduce__(self):
         return (_restore, (name, fields, tuple(self)))
+
     cls.__reduce__ = __reduce__
     cls._is_namedtuple_ = True
     return cls
@@ -656,7 +653,6 @@ _hijack_namedtuple()
 
 
 class PickleSerializer(FramedSerializer):
-
     """
     Serializes objects using Python's pickle serializer:
 
@@ -695,7 +691,6 @@ class CloudPickleSerializer(PickleSerializer):
 
 
 class MarshalSerializer(FramedSerializer):
-
     """
     Serializes objects using Python's Marshal serializer:
 
@@ -712,7 +707,6 @@ class MarshalSerializer(FramedSerializer):
 
 
 class AutoSerializer(FramedSerializer):
-
     """
     Choose marshal or pickle as serialization protocol automatically
     """
@@ -744,6 +738,7 @@ class CompressedSerializer(FramedSerializer):
     """
     Compress the serialized data
     """
+
     def __init__(self, serializer):
         FramedSerializer.__init__(self)
         assert isinstance(serializer, FramedSerializer), "serializer must be a FramedSerializer"
@@ -760,7 +755,6 @@ class CompressedSerializer(FramedSerializer):
 
 
 class UTF8Deserializer(Serializer):
-
     """
     Deserializes streams written by String.getBytes.
     """
@@ -829,7 +823,6 @@ def write_with_length(obj, stream):
 
 
 class ChunkedStream(object):
-
     """
     This is a file-like object takes a stream of data, of unknown length, and breaks it into fixed
     length frames.  The intended use case is serializing large data and sending it immediately over
@@ -890,6 +883,7 @@ class ChunkedStream(object):
 
 if __name__ == '__main__':
     import doctest
+
     (failure_count, test_count) = doctest.testmod()
     if failure_count:
         sys.exit(-1)

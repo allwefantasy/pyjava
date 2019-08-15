@@ -152,11 +152,9 @@ class ArrowPythonRunner(
                   new ArrowColumnVector(vector)
                 }.toArray[ColumnVector]
                 read()
+
               case SpecialLengths.PYTHON_EXCEPTION_THROWN =>
                 throw handlePythonException()
-              case SpecialLengths.END_OF_STREAM =>
-                handleEndOfStream()
-                null
 
               case SpecialLengths.END_OF_DATA_SECTION =>
                 handleEndOfDataSection()

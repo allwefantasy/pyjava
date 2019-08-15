@@ -3,9 +3,10 @@ package tech.mlsql.test
 import java.util
 
 import org.apache.spark.TaskContext
+import org.apache.spark.sql.SparkUtils
 import org.apache.spark.sql.catalyst.encoders.RowEncoder
-import org.apache.spark.sql.execution.vectorized.MutableColumnarRow
 import org.apache.spark.sql.streaming.StreamTest
+import org.apache.spark.sql.types.{LongType, StructField, StructType}
 import tech.mlsql.arrow.python.ispark.{ArrowPythonRunner, ChainedPythonFunctions, PythonConf, PythonFunction}
 import tech.mlsql.common.utils.lang.sc.ScalaMethodMacros.str
 
@@ -15,7 +16,7 @@ import scala.collection.JavaConverters._
   * 2019-08-14 WilliamZhu(allwefantasy@gmail.com)
   */
 class ArrowPythonRunnerSpec extends StreamTest {
-
+  //spark.executor.heartbeatInterval
   test("run") {
     val session = spark
     import session.implicits._
@@ -31,11 +32,10 @@ class ArrowPythonRunnerSpec extends StreamTest {
           """
             |import pandas as pd
             |import numpy as np
-            |for item in input_data.fetch_once():
+            |for item in data_manager.fetch_once():
             |    print(item)
-            |t_dict = {'a' : 1, 'b': 2, 'c':3}
-            |series_dict = pd.Series(t_dict)
-            |input_data.output([series_dict],)
+            |df = pd.DataFrame({'AAA': [4, 5, 6, 7],'BBB': [10, 20, 30, 40],'CCC': [100, 50, -30, -50]})
+            |data_manager.set_output([[df['AAA'],df['BBB']]])
           """.stripMargin, envs, "python", "3.6")))), struct,
         timezoneid, Map()
       )
@@ -44,14 +44,11 @@ class ArrowPythonRunnerSpec extends StreamTest {
       }
       val columnarBatchIter = batch.compute(Iterator(newIter), TaskContext.getPartitionId(), TaskContext.get())
       columnarBatchIter.flatMap { batch =>
-        val a = batch.rowIterator.asScala
-        while (a.hasNext) {
-          val item = a.next().asInstanceOf[MutableColumnarRow]
-          println(item.copy())
-        }
-        Seq().toIterator
+        batch.rowIterator.asScala
       }
-    }.count()
-    println(abc)
+    }//.count()
+    val wow = SparkUtils.internalCreateDataFrame(session, abc, StructType(Seq(StructField("AAA", LongType), StructField("BBB", LongType))), false)
+    wow.show()
+    //    println(abc)
   }
 }
