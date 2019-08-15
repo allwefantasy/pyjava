@@ -1,4 +1,4 @@
-package tech.mlsql.arrow.python.ispark
+package tech.mlsql.arrow.python.runner
 
 import java.io._
 import java.net._
@@ -10,7 +10,7 @@ import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types._
 import org.apache.spark.sql.vectorized.{ArrowColumnVector, ColumnVector, ColumnarBatch}
-import org.apache.spark.{SparkEnv, TaskContext}
+import tech.mlsql.arrow.context.CommonTaskContext
 import tech.mlsql.arrow.{ArrowUtils, ArrowWriter, Utils}
 
 import scala.collection.JavaConverters._
@@ -34,12 +34,11 @@ class ArrowPythonRunner(
   }
 
   protected override def newWriterThread(
-                                          env: SparkEnv,
                                           worker: Socket,
                                           inputIterator: Iterator[Iterator[InternalRow]],
                                           partitionIndex: Int,
-                                          context: TaskContext): WriterThread = {
-    new WriterThread(env, worker, inputIterator, partitionIndex, context) {
+                                          context: CommonTaskContext): WriterThread = {
+    new WriterThread(worker, inputIterator, partitionIndex, context) {
 
       protected override def writeCommand(dataOut: DataOutputStream): Unit = {
 
@@ -102,11 +101,10 @@ class ArrowPythonRunner(
                                             stream: DataInputStream,
                                             writerThread: WriterThread,
                                             startTime: Long,
-                                            env: SparkEnv,
                                             worker: Socket,
                                             releasedOrClosed: AtomicBoolean,
-                                            context: TaskContext): Iterator[ColumnarBatch] = {
-    new ReaderIterator(stream, writerThread, startTime, env, worker, releasedOrClosed, context) {
+                                            context: CommonTaskContext): Iterator[ColumnarBatch] = {
+    new ReaderIterator(stream, writerThread, startTime, worker, releasedOrClosed, context) {
 
       private val allocator = ArrowUtils.rootAllocator.newChildAllocator(
         s"stdin reader for $pythonExec", 0, Long.MaxValue)
@@ -115,13 +113,7 @@ class ArrowPythonRunner(
       private var root: VectorSchemaRoot = _
       private var schema: StructType = _
       private var vectors: Array[ColumnVector] = _
-
-      context.addTaskCompletionListener[Unit] { _ =>
-        if (reader != null) {
-          reader.close(false)
-        }
-        allocator.close()
-      }
+      context.readerRegister(() => {})(reader, allocator)
 
       private var batchLoaded = true
 

@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package tech.mlsql.arrow.python.ispark
+package tech.mlsql.arrow.python.runner
 
 import java.io._
 import java.net._
@@ -25,8 +25,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 import java.util.{Map => JMap}
 
 import org.apache.spark._
-import org.apache.spark.sql.SparkUtils
 import tech.mlsql.arrow.Utils
+import tech.mlsql.arrow.context.CommonTaskContext
 import tech.mlsql.arrow.python.PythonWorkerFactory
 import tech.mlsql.common.utils.lang.sc.ScalaMethodMacros.str
 import tech.mlsql.common.utils.log.Logging
@@ -78,7 +78,7 @@ abstract class BasePythonRunner[IN, OUT](
   def compute(
                inputIterator: Iterator[IN],
                partitionIndex: Int,
-               context: TaskContext): Iterator[OUT] = {
+               commonTaskContext: CommonTaskContext): Iterator[OUT] = {
     val startTime = System.currentTimeMillis
 
     if (reuseWorker) {
@@ -94,59 +94,47 @@ abstract class BasePythonRunner[IN, OUT](
     // sure there is only one winner that is going to release or close the worker.
     val releasedOrClosed = new AtomicBoolean(false)
 
-    val env = SparkEnv.get
     // Start a thread to feed the process input from our parent's iterator
-    val writerThread = newWriterThread(env, worker, inputIterator, partitionIndex, context)
+    val writerThread = newWriterThread(worker, inputIterator, partitionIndex, commonTaskContext)
 
-    context.addTaskCompletionListener[Unit] { _ =>
+    commonTaskContext.pythonWorkerRegister(() => {
       writerThread.shutdownOnTaskCompletion()
-      if (!reuseWorker || releasedOrClosed.compareAndSet(false, true)) {
-        try {
-          worker.close()
-        } catch {
-          case e: Exception =>
-            logWarning("Failed to close worker socket", e)
-        }
-      }
-    }
+    })(releasedOrClosed, reuseWorker, worker)
 
     writerThread.start()
-    new MonitorThread(env, worker, context, conf).start()
+    new MonitorThread(worker, commonTaskContext, conf).start()
 
     // Return an iterator that read lines from the process's stdout
     val stream = new DataInputStream(new BufferedInputStream(worker.getInputStream, bufferSize))
 
     val stdoutIterator = newReaderIterator(
-      stream, writerThread, startTime, env, worker, releasedOrClosed, context)
-    new InterruptibleIterator(context, stdoutIterator)
+      stream, writerThread, startTime, worker, releasedOrClosed, commonTaskContext)
+    new InterruptibleIterator(commonTaskContext, stdoutIterator)
   }
 
   protected def newWriterThread(
-                                 env: SparkEnv,
                                  worker: Socket,
                                  inputIterator: Iterator[IN],
                                  partitionIndex: Int,
-                                 context: TaskContext): WriterThread
+                                 context: CommonTaskContext): WriterThread
 
   protected def newReaderIterator(
                                    stream: DataInputStream,
                                    writerThread: WriterThread,
                                    startTime: Long,
-                                   env: SparkEnv,
                                    worker: Socket,
                                    releasedOrClosed: AtomicBoolean,
-                                   context: TaskContext): Iterator[OUT]
+                                   context: CommonTaskContext): Iterator[OUT]
 
   /**
     * The thread responsible for writing the data from the PythonRDD's parent iterator to the
     * Python process.
     */
   abstract class WriterThread(
-                               env: SparkEnv,
                                worker: Socket,
                                inputIterator: Iterator[IN],
                                partitionIndex: Int,
-                               context: TaskContext)
+                               context: CommonTaskContext)
     extends Thread(s"stdout writer for $pythonExec") {
 
     @volatile private var _exception: Throwable = null
@@ -158,7 +146,7 @@ abstract class BasePythonRunner[IN, OUT](
 
     /** Terminates the writer thread, ignoring any exceptions that may occur due to cleanup. */
     def shutdownOnTaskCompletion() {
-      assert(context.isCompleted)
+      context.assertTaskIsCompleted(() => {})
       this.interrupt()
     }
 
@@ -174,14 +162,14 @@ abstract class BasePythonRunner[IN, OUT](
 
     override def run(): Unit = Utils.logUncaughtExceptions {
       try {
-        SparkUtils.setTaskContext(context)
+        context.setTaskContext()
         val stream = new BufferedOutputStream(worker.getOutputStream, bufferSize)
         val dataOut = new DataOutputStream(stream)
         // Partition index
         dataOut.writeInt(partitionIndex)
 
         // Init a ServerSocket to accept method calls from Python side.
-        val isBarrier = context.isInstanceOf[BarrierTaskContext]
+        val isBarrier = context.isBarrier
         if (isBarrier) {
           serverSocket = Some(new ServerSocket(/* port */ 0,
             /* backlog */ 1,
@@ -227,7 +215,7 @@ abstract class BasePythonRunner[IN, OUT](
 
         // Close ServerSocket on task completion.
         serverSocket.foreach { server =>
-          context.addTaskCompletionListener[Unit](_ => server.close())
+          context.javaSideSocketServerRegister()(server)
         }
         val boundPort: Int = serverSocket.map(_.getLocalPort).getOrElse(0)
         if (boundPort == -1) {
@@ -239,7 +227,7 @@ abstract class BasePythonRunner[IN, OUT](
         }
 
         // all information we will write
-        // Notice that we should in python side get these information 
+        // Notice that we should in python side get these information
         dataOut.writeBoolean(isBarrier)
         dataOut.writeInt(boundPort)
         writeCommand(dataOut)
@@ -248,7 +236,7 @@ abstract class BasePythonRunner[IN, OUT](
         dataOut.flush()
       } catch {
         case t: Throwable if (NonFatal(t) || t.isInstanceOf[Exception]) =>
-          if (context.isCompleted || context.isInterrupted) {
+          if (context.isTaskCompleteOrInterrupt()()) {
             logDebug("Exception/NonFatal Error thrown after task completion (likely due to " +
               "cleanup)", t)
             if (!worker.isClosed) {
@@ -295,10 +283,9 @@ abstract class BasePythonRunner[IN, OUT](
                                  stream: DataInputStream,
                                  writerThread: WriterThread,
                                  startTime: Long,
-                                 env: SparkEnv,
                                  worker: Socket,
                                  releasedOrClosed: AtomicBoolean,
-                                 context: TaskContext)
+                                 context: CommonTaskContext)
     extends Iterator[OUT] {
 
     private var nextObj: OUT = _
@@ -358,9 +345,9 @@ abstract class BasePythonRunner[IN, OUT](
     }
 
     protected val handleException: PartialFunction[Throwable, OUT] = {
-      case e: Exception if context.isInterrupted =>
+      case e: Exception if context.isTaskInterrupt()() =>
         logDebug("Exception thrown after task interruption", e)
-        throw new TaskKilledException(SparkUtils.getKillReason(context).getOrElse("unknown reason"))
+        throw new TaskKilledException(context.getTaskKillReason()().getOrElse("unknown reason"))
 
       case e: Exception if writerThread.exception.isDefined =>
         logError("Python worker exited unexpectedly (crashed)", e)
@@ -377,7 +364,7 @@ abstract class BasePythonRunner[IN, OUT](
     * interrupts disabled. In that case we will need to explicitly kill the worker, otherwise the
     * threads can block indefinitely.
     */
-  class MonitorThread(env: SparkEnv, worker: Socket, context: TaskContext, conf: Map[String, String])
+  class MonitorThread(worker: Socket, context: CommonTaskContext, conf: Map[String, String])
     extends Thread(s"Worker Monitor for $pythonExec") {
 
     /** How long to wait before killing the python worker if a task cannot be interrupted. */
@@ -386,26 +373,7 @@ abstract class BasePythonRunner[IN, OUT](
     setDaemon(true)
 
     override def run() {
-      // Kill the worker if it is interrupted, checking until task completion.
-      // TODO: This has a race condition if interruption occurs, as completed may still become true.
-      while (!context.isInterrupted && !context.isCompleted) {
-        Thread.sleep(2000)
-      }
-      if (!context.isCompleted) {
-        Thread.sleep(taskKillTimeout)
-        if (!context.isCompleted) {
-          try {
-            // Mimic the task name used in `Executor` to help the user find out the task to blame.
-            val taskName = s"${context.partitionId}.${context.attemptNumber} " +
-              s"in stage ${context.stageId} (TID ${context.taskAttemptId})"
-            logWarning(s"Incomplete task $taskName interrupted: Attempting to kill Python Worker")
-            PythonWorkerFactory.destroyPythonWorker(pythonExec, envVars.asScala.toMap, worker)
-          } catch {
-            case e: Exception =>
-              logError("Exception when trying to kill worker", e)
-          }
-        }
-      }
+      context.monitor(() => {})(taskKillTimeout, pythonExec, envVars.asScala.toMap, worker)
     }
   }
 
@@ -426,5 +394,20 @@ object BarrierTaskContextMessageProtocol {
   val BARRIER_FUNCTION = 1
   val BARRIER_RESULT_SUCCESS = "success"
   val ERROR_UNRECOGNIZED_FUNCTION = "Not recognized function call from python side."
+}
+
+class InterruptibleIterator[+T](val context: CommonTaskContext, val delegate: Iterator[T])
+  extends Iterator[T] {
+
+  def hasNext: Boolean = {
+    // TODO(aarondav/rxin): Check Thread.interrupted instead of context.interrupted if interrupt
+    // is allowed. The assumption is that Thread.interrupted does not have a memory fence in read
+    // (just a volatile field in C), while context.interrupted is a volatile in the JVM, which
+    // introduces an expensive read fence.
+    context.killTaskIfInterrupted()
+    delegate.hasNext
+  }
+
+  def next(): T = delegate.next()
 }
 

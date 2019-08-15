@@ -7,7 +7,8 @@ import org.apache.spark.sql.SparkUtils
 import org.apache.spark.sql.catalyst.encoders.RowEncoder
 import org.apache.spark.sql.streaming.StreamTest
 import org.apache.spark.sql.types.{LongType, StructField, StructType}
-import tech.mlsql.arrow.python.ispark.{ArrowPythonRunner, ChainedPythonFunctions, PythonConf, PythonFunction}
+import tech.mlsql.arrow.python.ispark._
+import tech.mlsql.arrow.python.runner.{ArrowPythonRunner, ChainedPythonFunctions, PythonConf, PythonFunction}
 import tech.mlsql.common.utils.lang.sc.ScalaMethodMacros.str
 
 import scala.collection.JavaConverters._
@@ -42,11 +43,13 @@ class ArrowPythonRunnerSpec extends StreamTest {
       val newIter = iter.map { irow =>
         enconder.toRow(irow)
       }
-      val columnarBatchIter = batch.compute(Iterator(newIter), TaskContext.getPartitionId(), TaskContext.get())
+      val commonTaskContext = new SparkContextImp(TaskContext.get(), batch)
+      val columnarBatchIter = batch.compute(Iterator(newIter), TaskContext.getPartitionId(), commonTaskContext)
       columnarBatchIter.flatMap { batch =>
         batch.rowIterator.asScala
       }
-    }//.count()
+    }
+    //.count()
     val wow = SparkUtils.internalCreateDataFrame(session, abc, StructType(Seq(StructField("AAA", LongType), StructField("BBB", LongType))), false)
     wow.show()
     //    println(abc)

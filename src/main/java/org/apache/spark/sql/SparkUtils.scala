@@ -32,4 +32,8 @@ object SparkUtils {
   def setTaskContext(tc: TaskContext): Unit = TaskContext.setTaskContext(tc)
 
   def getKillReason(tc: TaskContext) = tc.getKillReason()
+
+  def killTaskIfInterrupted(tc: TaskContext) = {
+    tc.killTaskIfInterrupted()
+  }
 }
