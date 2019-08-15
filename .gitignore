@@ -6,3 +6,4 @@ python/pyjava.egg-info/
 target/
 python/.eggs/
 __pycache__
+spark-warehouse
