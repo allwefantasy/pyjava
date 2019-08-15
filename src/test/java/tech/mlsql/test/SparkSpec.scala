@@ -3,10 +3,11 @@ package tech.mlsql.test
 import java.util
 
 import org.apache.spark.TaskContext
-import org.apache.spark.sql.SparkUtils
 import org.apache.spark.sql.catalyst.encoders.RowEncoder
 import org.apache.spark.sql.streaming.StreamTest
-import org.apache.spark.sql.types.{LongType, StructField, StructType}
+import org.apache.spark.sql.types.{LongType, StringType, StructField, StructType}
+import org.apache.spark.sql.{Row, SparkUtils}
+import tech.mlsql.arrow.python.iapp.{AppContextImpl, JavaContext}
 import tech.mlsql.arrow.python.ispark._
 import tech.mlsql.arrow.python.runner.{ArrowPythonRunner, ChainedPythonFunctions, PythonConf, PythonFunction}
 import tech.mlsql.common.utils.lang.sc.ScalaMethodMacros.str
@@ -16,9 +17,9 @@ import scala.collection.JavaConverters._
 /**
   * 2019-08-14 WilliamZhu(allwefantasy@gmail.com)
   */
-class ArrowPythonRunnerSpec extends StreamTest {
+class SparkSpec extends StreamTest {
   //spark.executor.heartbeatInterval
-  test("run") {
+  test("spark") {
     val session = spark
     import session.implicits._
     val timezoneid = session.sessionState.conf.sessionLocalTimeZone
@@ -54,4 +55,6 @@ class ArrowPythonRunnerSpec extends StreamTest {
     wow.show()
     //    println(abc)
   }
+
+  
 }
