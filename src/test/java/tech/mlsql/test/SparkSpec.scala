@@ -3,11 +3,10 @@ package tech.mlsql.test
 import java.util
 
 import org.apache.spark.TaskContext
+import org.apache.spark.sql.SparkUtils
 import org.apache.spark.sql.catalyst.encoders.RowEncoder
 import org.apache.spark.sql.streaming.StreamTest
-import org.apache.spark.sql.types.{LongType, StringType, StructField, StructType}
-import org.apache.spark.sql.{Row, SparkUtils}
-import tech.mlsql.arrow.python.iapp.{AppContextImpl, JavaContext}
+import org.apache.spark.sql.types.{LongType, StructField, StructType}
 import tech.mlsql.arrow.python.ispark._
 import tech.mlsql.arrow.python.runner.{ArrowPythonRunner, ChainedPythonFunctions, PythonConf, PythonFunction}
 import tech.mlsql.common.utils.lang.sc.ScalaMethodMacros.str
@@ -56,5 +55,5 @@ class SparkSpec extends StreamTest {
     //    println(abc)
   }
 
-  
+
 }
