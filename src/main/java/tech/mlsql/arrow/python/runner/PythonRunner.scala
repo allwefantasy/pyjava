@@ -336,8 +336,8 @@ abstract class BasePythonRunner[IN, OUT](
     }
 
     protected def handleEndOfDataSection(): Unit = {
-
-      if (stream.readInt() == SpecialLengths.END_OF_STREAM) {
+      val flag = stream.readInt()
+      if (flag == SpecialLengths.END_OF_STREAM) {
         if (reuseWorker && releasedOrClosed.compareAndSet(false, true)) {
           PythonWorkerFactory.releasePythonWorker(pythonExec, envVars.asScala.toMap, worker)
         }
