@@ -42,6 +42,8 @@ else:
 pickleSer = PickleSerializer()
 utf8_deserializer = UTF8Deserializer()
 
+globals_namespace = globals()
+
 
 def read_command(serializer, file):
     command = serializer.load_stream(file)
@@ -96,12 +98,13 @@ def main(infile, outfile):
 
         def process():
             inpu_data = ser.load_stream(infile)
-            data = Data(inpu_data, conf)
-            code = compile(command, '<string>', 'exec', dont_inherit=False)
-            global_p = {}
-            local_p = {"data_manager": data}
-            exec (code, global_p, local_p)
-            out_iter = data.output()
+            global data_manager
+            data_manager = Data(inpu_data, conf)
+            code = compile(command, '<string>', 'exec')
+            global globals_namespace
+            exec (code, globals_namespace, globals_namespace)
+
+            out_iter = data_manager.output()
             try:
                 write_int(SpecialLengths.START_ARROW_STREAM, outfile)
                 out_ser.dump_stream(out_iter, outfile)
