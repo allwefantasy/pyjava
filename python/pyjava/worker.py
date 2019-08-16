@@ -96,11 +96,11 @@ def main(infile, outfile):
 
         def process():
             inpu_data = ser.load_stream(infile)
-            data = Data(inpu_data,conf)
-            code = compile(command, '<string>', 'exec')
+            data = Data(inpu_data, conf)
+            code = compile(command, '<string>', 'exec', dont_inherit=False)
             global_p = {}
             local_p = {"data_manager": data}
-            exec(code, global_p, local_p)
+            exec (code, global_p, local_p)
             out_iter = data.output()
             try:
                 write_int(SpecialLengths.START_ARROW_STREAM, outfile)
