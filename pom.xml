@@ -9,7 +9,7 @@
     <version>0.1.0</version>
     <url>https://github.com/allwefantasy/pyjava</url>
     <description>
-        Communication between Python And Java with Arrow.
+        Communication between Python And Java with Apache Arrow.
     </description>
     <licenses>
         <license>
@@ -59,8 +59,7 @@
         <dependency>
             <groupId>tech.mlsql</groupId>
             <artifactId>common-utils_${scala.binary.version}</artifactId>
-            <version>0.1.5</version>
-
+            <version>0.1.6</version>
         </dependency>
         <dependency>
             <groupId>org.scalactic</groupId>
