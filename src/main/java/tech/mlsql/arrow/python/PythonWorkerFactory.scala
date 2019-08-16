@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit
 import javax.annotation.concurrent.GuardedBy
 import tech.mlsql.arrow.Utils
 import tech.mlsql.arrow.Utils.RedirectThread
-import tech.mlsql.arrow.python.ispark.PythonConf
+import tech.mlsql.arrow.python.runner.PythonConf
 import tech.mlsql.common.utils.lang.sc.ScalaMethodMacros
 import tech.mlsql.common.utils.log.Logging
 
@@ -69,7 +69,7 @@ class PythonWorkerFactory(pythonExec: String, envVars: Map[String, String], conf
     sys.env.getOrElse("PYTHONPATH", ""))
 
   def create(): Socket = {
-   val socket =  if (useDaemon) {
+    val socket = if (useDaemon) {
       self.synchronized {
         if (idleWorkers.nonEmpty) {
           return idleWorkers.dequeue()
