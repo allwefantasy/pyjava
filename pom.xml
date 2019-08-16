@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>tech.mlsql</groupId>
-    <artifactId>pyjava</artifactId>
+    <artifactId>pyjava-2.4_2.11</artifactId>
     <version>0.1.0</version>
     <url>https://github.com/allwefantasy/pyjava</url>
     <description>
@@ -53,13 +53,14 @@
         <serviceframework.version>2.0.0</serviceframework.version>
         <scope>provided</scope>
         <hadoop-client-version>2.6.5</hadoop-client-version>
+        <common-utils-version>0.1.6</common-utils-version>
     </properties>
 
     <dependencies>
         <dependency>
             <groupId>tech.mlsql</groupId>
             <artifactId>common-utils_${scala.binary.version}</artifactId>
-            <version>0.1.6</version>
+            <version>${common-utils-version}</version>
         </dependency>
         <dependency>
             <groupId>org.scalactic</groupId>
@@ -200,7 +201,20 @@
     </dependencies>
 
     <profiles>
-
+        <profile>
+            <id>spark-2.3</id>
+            <properties>
+                <spark.version>2.3.2</spark.version>
+                <spark.bigversion>2.3</spark.bigversion>
+            </properties>
+        </profile>
+        <profile>
+            <id>spark-2.4</id>
+            <properties>
+                <spark.version>2.4.3</spark.version>
+                <spark.bigversion>2.4</spark.bigversion>
+            </properties>
+        </profile>
         <profile>
             <id>disable-java8-doclint</id>
             <activation>

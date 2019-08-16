@@ -29,6 +29,7 @@ import tech.mlsql.arrow.Utils
 import tech.mlsql.arrow.context.CommonTaskContext
 import tech.mlsql.arrow.python.PythonWorkerFactory
 import tech.mlsql.common.utils.lang.sc.ScalaMethodMacros.str
+import tech.mlsql.common.utils.lang.sc.ScalaReflect
 import tech.mlsql.common.utils.log.Logging
 
 import scala.collection.JavaConverters._
@@ -262,7 +263,7 @@ abstract class BasePythonRunner[IN, OUT](
 
       val out = new DataOutputStream(new BufferedOutputStream(sock.getOutputStream))
       try {
-        context.asInstanceOf[BarrierTaskContext].barrier()
+        ScalaReflect.fromInstance(context.innerContext).method("barrier").invoke()
         writeUTF(BarrierTaskContextMessageProtocol.BARRIER_RESULT_SUCCESS, out)
       } catch {
         case e: SparkException =>

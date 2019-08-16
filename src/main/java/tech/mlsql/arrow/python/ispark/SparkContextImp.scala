@@ -5,8 +5,8 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.ipc.ArrowStreamReader
+import org.apache.spark.TaskContext
 import org.apache.spark.sql.SparkUtils
-import org.apache.spark.{BarrierTaskContext, TaskContext}
 import tech.mlsql.arrow.context.CommonTaskContext
 import tech.mlsql.arrow.python.PythonWorkerFactory
 import tech.mlsql.arrow.python.runner.ArrowPythonRunner
@@ -21,7 +21,7 @@ class SparkContextImp(context: TaskContext, _arrowPythonRunner: ArrowPythonRunne
      reuseWorker: Boolean,
      worker: Socket
     ) => {
-      context.addTaskCompletionListener[Unit] { _ =>
+      context.addTaskCompletionListener { _ =>
         //writerThread.shutdownOnTaskCompletion()
         callback()
         if (!reuseWorker || releasedOrClosed.compareAndSet(false, true)) {
@@ -50,7 +50,7 @@ class SparkContextImp(context: TaskContext, _arrowPythonRunner: ArrowPythonRunne
 
   override def innerContext: Any = context
 
-  override def isBarrier: Boolean = context.isInstanceOf[BarrierTaskContext]
+  override def isBarrier: Boolean = context.getClass.getName == "org.apache.spark.BarrierTaskContext"
 
   override def monitor(callback: () => Unit) = {
     (taskKillTimeout: Long, pythonExec: String, envVars: Map[String, String], worker: Socket) => {
@@ -81,7 +81,7 @@ class SparkContextImp(context: TaskContext, _arrowPythonRunner: ArrowPythonRunne
 
   override def javaSideSocketServerRegister(): ServerSocket => Unit = {
     (server: ServerSocket) => {
-      context.addTaskCompletionListener[Unit](_ => server.close())
+      context.addTaskCompletionListener(_ => server.close())
     }
   }
 
@@ -111,7 +111,7 @@ class SparkContextImp(context: TaskContext, _arrowPythonRunner: ArrowPythonRunne
 
   override def readerRegister(callback: () => Unit): (ArrowStreamReader, BufferAllocator) => Unit = {
     (reader, allocator) => {
-      context.addTaskCompletionListener[Unit] { _ =>
+      context.addTaskCompletionListener { _ =>
         if (reader != null) {
           reader.close(false)
         }

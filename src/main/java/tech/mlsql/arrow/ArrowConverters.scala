@@ -86,7 +86,7 @@ object ArrowConverters {
     val unloader = new VectorUnloader(root)
     val arrowWriter = ArrowWriter.create(root)
 
-    context.addTaskCompletionListener[Unit] { _ =>
+    context.addTaskCompletionListener { _ =>
       root.close()
       allocator.close()
     }
@@ -140,7 +140,7 @@ object ArrowConverters {
     new Iterator[InternalRow] {
       private var rowIter = if (arrowBatchIter.hasNext) nextBatch() else Iterator.empty
 
-      context.addTaskCompletionListener[Unit] { _ =>
+      context.addTaskCompletionListener { _ =>
         root.close()
         allocator.close()
       }

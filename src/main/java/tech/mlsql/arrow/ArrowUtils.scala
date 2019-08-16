@@ -21,7 +21,6 @@ import org.apache.arrow.memory.RootAllocator
 import org.apache.arrow.vector.types.pojo.{ArrowType, Field, FieldType, Schema}
 import org.apache.arrow.vector.types.{DateUnit, FloatingPointPrecision, TimeUnit}
 import org.apache.spark.sql.SparkUtils
-import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types._
 
 import scala.collection.JavaConverters._
@@ -129,17 +128,5 @@ object ArrowUtils {
     })
   }
 
-  /** Return Map with conf settings to be used in ArrowPythonRunner */
-  def getPythonRunnerConfMap(conf: SQLConf): Map[String, String] = {
-    val timeZoneConf = if (conf.pandasRespectSessionTimeZone) {
-      Seq(SQLConf.SESSION_LOCAL_TIMEZONE.key -> conf.sessionLocalTimeZone)
-    } else {
-      Nil
-    }
-    val pandasColsByName = Seq(SQLConf.PANDAS_GROUPED_MAP_ASSIGN_COLUMNS_BY_NAME.key ->
-      conf.pandasGroupedMapAssignColumnsByName.toString)
-    val arrowSafeTypeCheck = Seq("spark.sql.execution.pandas.arrowSafeTypeConversion" ->
-      "false")
-    Map(timeZoneConf ++ pandasColsByName ++ arrowSafeTypeCheck: _*)
-  }
+
 }
