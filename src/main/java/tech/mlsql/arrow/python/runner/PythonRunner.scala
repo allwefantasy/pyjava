@@ -41,6 +41,8 @@ object PythonConf {
   val PY_EXECUTOR_MEMORY = "py_executor_memory"
   val EXECUTOR_CORES = "executor_cores"
   val PYTHON_ENV = "python_env"
+  val PY_INTERACTIVE = "no"
+  val PY_EXECUTE_USER = "no"
 }
 
 case class PythonFunction(
@@ -341,6 +343,15 @@ abstract class BasePythonRunner[IN, OUT](
         if (reuseWorker && releasedOrClosed.compareAndSet(false, true)) {
           PythonWorkerFactory.releasePythonWorker(pythonExec, envVars.asScala.toMap, worker)
         }
+      } else {
+        logWarning(
+          s"""
+             |-----------------------WARNING--------------------------------------------------------------------
+             |Here we should received message is SpecialLengths.END_OF_STREAM:${SpecialLengths.END_OF_STREAM}
+             |But It's now ${flag}.
+             |This may cause the **** python worker leak **** and make the ***interactive mode fails***.
+             |--------------------------------------------------------------------------------------------------
+           """.stripMargin)
       }
       eos = true
     }
