@@ -95,14 +95,22 @@ def main(infile, outfile):
         command = utf8_deserializer.loads(infile)
         ser = ArrowStreamSerializer()
         out_ser = ArrowStreamPandasSerializer(None, True, True)
+        is_interactive = os.environ.get('PY_INTERACTIVE', "no") == "yes"
 
         def process():
-            inpu_data = ser.load_stream(infile)
-            global data_manager
-            data_manager = Data(inpu_data, conf)
+            input_data = ser.load_stream(infile)
             code = compile(command, '<string>', 'exec')
-            global globals_namespace
-            exec (code, globals_namespace, globals_namespace)
+
+            if is_interactive:
+                global data_manager
+                data_manager = Data(input_data, conf)
+                global globals_namespace
+                exec (code, globals_namespace, globals_namespace)
+            else:
+                data_manager = Data(input_data, conf)
+                n_local = {"data_manager": data_manager}
+                g_local = {}
+                exec (code, g_local, n_local)
 
             out_iter = data_manager.output()
             try:
