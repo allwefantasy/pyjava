@@ -111,7 +111,6 @@ def main(infile, outfile):
                 n_local = {"data_manager": data_manager}
                 g_local = {}
                 exec (code, g_local, n_local)
-
             out_iter = data_manager.output()
             try:
                 write_int(SpecialLengths.START_ARROW_STREAM, outfile)
