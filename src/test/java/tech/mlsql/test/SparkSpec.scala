@@ -49,10 +49,9 @@ class SparkSpec extends StreamTest {
         batch.rowIterator.asScala
       }
     }
-    //.count()
+
     val wow = SparkUtils.internalCreateDataFrame(session, abc, StructType(Seq(StructField("AAA", LongType), StructField("BBB", LongType))), false)
     wow.show()
-    //    println(abc)
   }
 
 
