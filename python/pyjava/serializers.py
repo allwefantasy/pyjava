@@ -15,41 +15,6 @@
 # limitations under the License.
 #
 
-"""
-PySpark supports custom serializers for transferring data; this can improve
-performance.
-
-By default, PySpark uses :class:`PickleSerializer` to serialize objects using Python's
-`cPickle` serializer, which can serialize nearly any Python object.
-Other serializers, like :class:`MarshalSerializer`, support fewer datatypes but can be
-faster.
-
-The serializer is chosen when creating :class:`SparkContext`:
-
->>> from pyspark.context import SparkContext
->>> from pyspark.serializers import MarshalSerializer
->>> sc = SparkContext('local', 'test', serializer=MarshalSerializer())
->>> sc.parallelize(list(range(1000))).map(lambda x: 2 * x).take(10)
-[0, 2, 4, 6, 8, 10, 12, 14, 16, 18]
->>> sc.stop()
-
-PySpark serializes objects in batches; by default, the batch size is chosen based
-on the size of objects and is also configurable by SparkContext's `batchSize`
-parameter:
-
->>> sc = SparkContext('local', 'test', batchSize=2)
->>> rdd = sc.parallelize(range(16), 4).map(lambda x: x)
-
-Behind the scenes, this creates a JavaRDD with four partitions, each of
-which contains two batches of two objects:
-
->>> rdd.glom().collect()
-[[0, 1, 2, 3], [4, 5, 6, 7], [8, 9, 10, 11], [12, 13, 14, 15]]
->>> int(rdd._jrdd.count())
-8
->>> sc.stop()
-"""
-
 import collections
 import itertools
 import marshal
@@ -58,6 +23,8 @@ import sys
 import types
 import zlib
 from itertools import chain, product
+
+from pyjava.datatype.types import _check_series_localize_timestamps, _check_series_convert_timestamps_internal
 
 if sys.version < '3':
     import cPickle as pickle
@@ -68,9 +35,6 @@ else:
     basestring = unicode = str
     xrange = range
 pickle_protocol = pickle.HIGHEST_PROTOCOL
-
-from pyspark import cloudpickle
-from pyspark.util import _exception_message
 
 __all__ = ["PickleSerializer", "MarshalSerializer", "UTF8Deserializer"]
 
@@ -265,7 +229,6 @@ class ArrowStreamPandasSerializer(ArrowStreamSerializer):
         self._assign_cols_by_name = assign_cols_by_name
 
     def arrow_to_pandas(self, arrow_column):
-        from pyspark.sql.types import _check_series_localize_timestamps
 
         # If the given column is a date type column, creates a series of datetime.date directly
         # instead of creating datetime64[ns] as intermediate data to avoid overflow caused by
@@ -285,13 +248,13 @@ class ArrowStreamPandasSerializer(ArrowStreamSerializer):
         """
         import pandas as pd
         import pyarrow as pa
-        from pyspark.sql.types import _check_series_convert_timestamps_internal
         # Make input conform to [(series1, type1), (series2, type2), ...]
         if not isinstance(series, (list, tuple)) or \
                 (len(series) == 2 and isinstance(series[1], pa.DataType)):
             series = [series]
         series = ((s, None) if not isinstance(s, (list, tuple)) else s for s in series)
         print(series)
+
         def create_array(s, t):
             mask = s.isnull()
             # Ensure timestamp series are in expected form for Spark internal representation
@@ -501,11 +464,6 @@ class AutoBatchedSerializer(BatchedSerializer):
 
 
 class CartesianDeserializer(Serializer):
-    """
-    Deserializes the JavaRDD cartesian() of two PythonRDDs.
-    Due to pyspark batching we cannot simply use the result of the Java RDD cartesian,
-    we additionally need to do the cartesian within each pair of batches.
-    """
 
     def __init__(self, key_ser, val_ser):
         self.key_ser = key_ser
@@ -527,11 +485,6 @@ class CartesianDeserializer(Serializer):
 
 
 class PairDeserializer(Serializer):
-    """
-    Deserializes the JavaRDD zip() of two PythonRDDs.
-    Due to pyspark batching we cannot simply use the result of the Java RDD zip,
-    we additionally need to do the zip within each pair of batches.
-    """
 
     def __init__(self, key_ser, val_ser):
         self.key_ser = key_ser

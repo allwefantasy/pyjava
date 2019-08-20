@@ -15,35 +15,6 @@
 # limitations under the License.
 #
 
-"""
-PySpark is the Python API for Spark.
-
-Public classes:
-
-  - :class:`SparkContext`:
-      Main entry point for Spark functionality.
-  - :class:`RDD`:
-      A Resilient Distributed Dataset (RDD), the basic abstraction in Spark.
-  - :class:`Broadcast`:
-      A broadcast variable that gets reused across tasks.
-  - :class:`Accumulator`:
-      An "add-only" shared variable that tasks can only add values to.
-  - :class:`SparkConf`:
-      For configuring Spark.
-  - :class:`SparkFiles`:
-      Access files shipped with jobs.
-  - :class:`StorageLevel`:
-      Finer-grained cache persistence levels.
-  - :class:`TaskContext`:
-      Information about the current running task, available on the workers and experimental.
-  - :class:`RDDBarrier`:
-      Wraps an RDD under a barrier stage for barrier execution.
-  - :class:`BarrierTaskContext`:
-      A :class:`TaskContext` that provides extra info and tooling for barrier execution.
-  - :class:`BarrierTaskInfo`:
-      Information about a barrier task.
-"""
-
 import types
 from functools import wraps
 
