@@ -10,7 +10,11 @@ The initial code in this lib is from Apache Spark.
 
 
 Notice: 
-Make sure you python env have pyjava 0.1.1 installed before testing following examples.
+Make sure you python env have pyjava installed before testing following examples.
+
+```sql
+pip uninstall pyjava && pip install pyjava
+```
 
 ## Example In Spark
 

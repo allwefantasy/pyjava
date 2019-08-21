@@ -12,6 +12,7 @@ import java.util.concurrent.TimeUnit
 import javax.annotation.concurrent.GuardedBy
 import tech.mlsql.arrow.Utils
 import tech.mlsql.arrow.Utils.RedirectThread
+import tech.mlsql.arrow.api.RedirectStreams
 import tech.mlsql.arrow.python.runner.PythonConf
 import tech.mlsql.common.utils.lang.sc.ScalaMethodMacros
 import tech.mlsql.common.utils.log.Logging
@@ -136,7 +137,7 @@ class PythonWorkerFactory(pythonExec: String, envVars: Map[String, String], conf
       val worker = pb.start()
 
       // Redirect worker stdout and stderr
-      redirectStreamsToStderr(worker.getInputStream, worker.getErrorStream)
+      redirectStreams(worker.getInputStream, worker.getErrorStream)
 
       // Wait for it to connect to our socket, and validate the auth secret.
       serverSocket.setSoTimeout(10000)
@@ -205,7 +206,7 @@ class PythonWorkerFactory(pythonExec: String, envVars: Map[String, String], conf
         }
 
         // Redirect daemon stdout and stderr
-        redirectStreamsToStderr(in, daemon.getErrorStream)
+        redirectStreams(in, daemon.getErrorStream)
       } catch {
         case e: Exception =>
 
@@ -243,10 +244,18 @@ class PythonWorkerFactory(pythonExec: String, envVars: Map[String, String], conf
   /**
     * Redirect the given streams to our stderr in separate threads.
     */
-  private def redirectStreamsToStderr(stdout: InputStream, stderr: InputStream) {
+  private def redirectStreams(stdout: InputStream, stderr: InputStream) {
     try {
-      new RedirectThread(stdout, System.err, "stdout reader for " + pythonExec).start()
-      new RedirectThread(stderr, System.err, "stderr reader for " + pythonExec).start()
+      conf.get(REDIRECT_IMPL) match {
+        case None =>
+          new RedirectThread(stdout, System.err, "stdout reader for " + pythonExec).start()
+          new RedirectThread(stderr, System.err, "stderr reader for " + pythonExec).start()
+        case Some(clzz) =>
+          val instance = Class.forName(clzz).newInstance().asInstanceOf[RedirectStreams]
+          instance.setConf(conf)
+          instance.stdOut(stdout)
+          instance.stdErr(stderr)
+      }
     } catch {
       case e: Exception =>
         logError("Exception in redirecting streams", e)
@@ -379,6 +388,7 @@ object PythonWorkerFactory {
     val PYTHON_DAEMON_MODULE = "python.daemon.module"
     val PYTHON_WORKER_MODULE = "python.worker.module"
     val PYTHON_TASK_KILL_TIMEOUT = "python.task.killTimeout"
+    val REDIRECT_IMPL = "python.redirect.impl"
 
     def mergePythonPaths(paths: String*): String = {
       paths.filter(_ != "").mkString(File.pathSeparator)
