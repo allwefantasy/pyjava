@@ -24,6 +24,7 @@ import types
 import zlib
 from itertools import chain, product
 
+from pyjava import cloudpickle
 from pyjava.datatype.types import _check_series_localize_timestamps, _check_series_convert_timestamps_internal
 
 if sys.version < '3':
@@ -35,8 +36,6 @@ else:
     basestring = unicode = str
     xrange = range
 pickle_protocol = pickle.HIGHEST_PROTOCOL
-
-__all__ = ["PickleSerializer", "MarshalSerializer", "UTF8Deserializer"]
 
 
 class SpecialLengths(object):
@@ -634,7 +633,8 @@ class CloudPickleSerializer(PickleSerializer):
         except pickle.PickleError:
             raise
         except Exception as e:
-            emsg = _exception_message(e)
+            import pyjava.utils as utils
+            emsg = utils._exception_message(e)
             if "'i' format requires" in emsg:
                 msg = "Object too large to serialize: %s" % emsg
             else:

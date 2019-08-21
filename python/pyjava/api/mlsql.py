@@ -21,6 +21,8 @@ class Data(object):
             pass
 
     def fetch_once(self):
-        have_fetched = True
+        if self.have_fetched:
+            raise Exception("input data can only be fetched once")
+        self.have_fetched = True
         for item in self.input_data:
             yield item.to_pydict()

@@ -105,12 +105,12 @@ def main(infile, outfile):
                 global data_manager
                 data_manager = Data(input_data, conf)
                 global globals_namespace
-                exec (code, globals_namespace, globals_namespace)
+                exec(code, globals_namespace, globals_namespace)
             else:
                 data_manager = Data(input_data, conf)
                 n_local = {"data_manager": data_manager}
                 g_local = {}
-                exec (code, g_local, n_local)
+                exec(code, g_local, n_local)
             out_iter = data_manager.output()
             try:
                 write_int(SpecialLengths.START_ARROW_STREAM, outfile)

@@ -14,7 +14,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-
 import base64
 import calendar
 import ctypes
@@ -32,7 +31,7 @@ if sys.version >= "3":
 
 from py4j.protocol import register_input_converter
 from py4j.java_gateway import JavaClass
-from pyjava.serializers import CloudPickleSerializer
+
 
 __all__ = [
     "DataType", "NullType", "StringType", "BinaryType", "BooleanType", "DateType",
@@ -711,6 +710,7 @@ class UserDefinedType(DataType):
         return json.dumps(self.jsonValue(), separators=(',', ':'), sort_keys=True)
 
     def jsonValue(self):
+        from pyjava.serializers import CloudPickleSerializer
         if self.scalaUDT():
             assert self.module() != '__main__', 'UDT in __main__ cannot work with ScalaUDT'
             schema = {
@@ -732,6 +732,7 @@ class UserDefinedType(DataType):
 
     @classmethod
     def fromJson(cls, json):
+        from pyjava.serializers import CloudPickleSerializer
         pyUDT = str(json["pyClass"])  # convert unicode to str
         split = pyUDT.rfind(".")
         pyModule = pyUDT[:split]
