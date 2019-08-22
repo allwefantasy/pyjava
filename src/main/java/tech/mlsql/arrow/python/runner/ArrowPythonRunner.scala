@@ -2,7 +2,6 @@ package tech.mlsql.arrow.python.runner
 
 import java.io._
 import java.net._
-import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicBoolean
 
 import org.apache.arrow.vector.VectorSchemaRoot
@@ -27,12 +26,6 @@ class ArrowPythonRunner(
   extends BasePythonRunner[Iterator[InternalRow], ColumnarBatch](
     funcs, conf) {
 
-  def writeUTF(str: String, dataOut: DataOutputStream) {
-    val bytes = str.getBytes(StandardCharsets.UTF_8)
-    dataOut.writeInt(bytes.length)
-    dataOut.write(bytes)
-  }
-
   protected override def newWriterThread(
                                           worker: Socket,
                                           inputIterator: Iterator[Iterator[InternalRow]],
@@ -45,14 +38,14 @@ class ArrowPythonRunner(
         // Write config for the worker as a number of key -> value pairs of strings
         dataOut.writeInt(conf.size + 1)
         for ((k, v) <- conf) {
-          writeUTF(k, dataOut)
-          writeUTF(v, dataOut)
+          Utils.writeUTF(k, dataOut)
+          Utils.writeUTF(v, dataOut)
         }
-        writeUTF("timezone", dataOut)
-        writeUTF(timeZoneId, dataOut)
+        Utils.writeUTF("timezone", dataOut)
+        Utils.writeUTF(timeZoneId, dataOut)
 
         val command = funcs.head.funcs.head.command
-        writeUTF(command, dataOut)
+        Utils.writeUTF(command, dataOut)
 
       }
 

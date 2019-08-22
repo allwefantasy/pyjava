@@ -4,7 +4,7 @@ import java.io.InputStream
 
 
 /**
-  * We will redirect all python daemon(worker) stdout/stderr to the the java's stderr
+  * We will redirect all python daemon(or worker) stdout/stderr to the the java's stderr
   * by default. If you wanna change this behavior try to implements this Trait and
   * config the conf in ArrowPythonRunner.
   *

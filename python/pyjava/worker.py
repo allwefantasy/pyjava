@@ -17,7 +17,7 @@
 
 from __future__ import print_function
 
-from pyjava.api.mlsql import Data
+from pyjava.api.mlsql import PythonContext
 from pyjava.utils import *
 
 # 'resource' is a Unix specific module.
@@ -106,12 +106,14 @@ def main(infile, outfile):
 
             if is_interactive:
                 global data_manager
-                data_manager = Data(input_data, conf)
+                global context
+                data_manager = PythonContext(input_data, conf)
+                context = data_manager
                 global globals_namespace
                 exec (code, globals_namespace, globals_namespace)
             else:
-                data_manager = Data(input_data, conf)
-                n_local = {"data_manager": data_manager}
+                data_manager = PythonContext(input_data, conf)
+                n_local = {"data_manager": data_manager, "context": data_manager}
                 g_local = {}
                 exec (code, g_local, n_local)
             out_iter = data_manager.output()

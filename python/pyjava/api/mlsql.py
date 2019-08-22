@@ -1,4 +1,10 @@
-class Data(object):
+import sys
+
+from pyjava.serializers import read_int
+from pyjava.utils import utf8_deserializer
+
+
+class PythonContext(object):
 
     def __init__(self, iterator, conf):
         self.input_data = iterator
@@ -26,3 +32,23 @@ class Data(object):
         self.have_fetched = True
         for item in self.input_data:
             yield item.to_pydict()
+
+
+class PythonProjectContext(object):
+    def __init__(self):
+        self.params_readed = False
+        self.conf = {}
+
+    def read_params_once(self):
+        self.params_readed = True
+        infile = sys.stdin
+        for i in range(read_int(infile)):
+            k = utf8_deserializer.loads(infile)
+            v = utf8_deserializer.loads(infile)
+            self.conf[k] = v
+
+    def input_data_dir(self):
+        return self.conf["tempDataLocalPath"]
+
+    def output_model_dir(self):
+        return self.conf["tempModelLocalPath"]

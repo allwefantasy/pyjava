@@ -20,7 +20,6 @@ package tech.mlsql.arrow.python.runner
 import java.io._
 import java.net._
 import java.nio.charset.StandardCharsets
-import java.nio.charset.StandardCharsets.UTF_8
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.{Map => JMap}
 
@@ -266,20 +265,15 @@ abstract class BasePythonRunner[IN, OUT](
       val out = new DataOutputStream(new BufferedOutputStream(sock.getOutputStream))
       try {
         ScalaReflect.fromInstance(context.innerContext).method("barrier").invoke()
-        writeUTF(BarrierTaskContextMessageProtocol.BARRIER_RESULT_SUCCESS, out)
+        Utils.writeUTF(BarrierTaskContextMessageProtocol.BARRIER_RESULT_SUCCESS, out)
       } catch {
         case e: SparkException =>
-          writeUTF(e.getMessage, out)
+          Utils.writeUTF(e.getMessage, out)
       } finally {
         out.close()
       }
     }
 
-    def writeUTF(str: String, dataOut: DataOutputStream) {
-      val bytes = str.getBytes(UTF_8)
-      dataOut.writeInt(bytes.length)
-      dataOut.write(bytes)
-    }
   }
 
   abstract class ReaderIterator(

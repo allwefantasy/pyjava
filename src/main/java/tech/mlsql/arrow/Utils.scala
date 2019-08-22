@@ -1,8 +1,12 @@
 package tech.mlsql.arrow
 
-import java.io.{Closeable, IOException, InputStream, OutputStream}
+import java.io._
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.TimeUnit
 
+import org.apache.spark.network.util.JavaUtils
+import tech.mlsql.arrow.api.RedirectStreams
+import tech.mlsql.arrow.python.PythonWorkerFactory.Tool.REDIRECT_IMPL
 import tech.mlsql.common.utils.log.Logging
 
 import scala.io.Source
@@ -129,6 +133,34 @@ object Utils extends Logging {
       case _ =>
         true
     }
+  }
+
+  def deleteRecursively(file: File): Unit = {
+    if (file != null) {
+      JavaUtils.deleteRecursively(file)
+    }
+  }
+
+  def redirectStream(conf: Map[String, String], stdout: InputStream) {
+    try {
+      conf.get(REDIRECT_IMPL) match {
+        case None =>
+          new RedirectThread(stdout, System.err, "stdout reader  ").start()
+        case Some(clzz) =>
+          val instance = Class.forName(clzz).newInstance().asInstanceOf[RedirectStreams]
+          instance.setConf(conf)
+          instance.stdOut(stdout)
+      }
+    } catch {
+      case e: Exception =>
+        logError("Exception in redirecting streams", e)
+    }
+  }
+
+  def writeUTF(str: String, dataOut: DataOutputStream) {
+    val bytes = str.getBytes(StandardCharsets.UTF_8)
+    dataOut.writeInt(bytes.length)
+    dataOut.write(bytes)
   }
 
 }
