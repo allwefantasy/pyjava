@@ -199,7 +199,7 @@ abstract class BasePythonRunner[IN, OUT](
                     case _ =>
                       val out = new DataOutputStream(new BufferedOutputStream(
                         sock.getOutputStream))
-                      writeUTF(BarrierTaskContextMessageProtocol.ERROR_UNRECOGNIZED_FUNCTION, out)
+                      Utils.writeUTF(BarrierTaskContextMessageProtocol.ERROR_UNRECOGNIZED_FUNCTION, out)
                   }
                 } catch {
                   case e: SocketException if e.getMessage.contains("Socket closed") =>

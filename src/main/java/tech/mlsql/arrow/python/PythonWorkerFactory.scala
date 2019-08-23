@@ -135,7 +135,8 @@ class PythonWorkerFactory(pythonExec: String, envVars: Map[String, String], conf
       val worker = pb.start()
 
       // Redirect worker stdout and stderr
-      redirectStreams(worker.getInputStream, worker.getErrorStream)
+      Utils.redirectStream(conf, worker.getInputStream)
+      Utils.redirectStream(conf, worker.getErrorStream)
 
       // Wait for it to connect to our socket, and validate the auth secret.
       serverSocket.setSoTimeout(10000)

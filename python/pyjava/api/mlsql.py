@@ -1,5 +1,9 @@
 import sys
 
+if sys.version >= '3':
+    basestring = str
+else:
+    pass
 from pyjava.serializers import read_int
 from pyjava.utils import utf8_deserializer
 
@@ -36,12 +40,12 @@ class PythonContext(object):
 
 class PythonProjectContext(object):
     def __init__(self):
-        self.params_readed = False
+        self.params_read = False
         self.conf = {}
 
     def read_params_once(self):
-        self.params_readed = True
-        infile = sys.stdin
+        self.params_read = True
+        infile = sys.stdin.buffer
         for i in range(read_int(infile)):
             k = utf8_deserializer.loads(infile)
             v = utf8_deserializer.loads(infile)

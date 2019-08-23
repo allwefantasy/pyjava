@@ -11,17 +11,16 @@ import scala.io.Source
 /**
   * 2019-08-22 WilliamZhu(allwefantasy@gmail.com)
   */
-class PythonProjectRunner extends Logging {
+class PythonProjectRunner(projectDirectory: String,
+                          env: Map[String, String]) extends Logging {
 
   import PythonProjectRunner._
 
   def run(command: Seq[String],
-          taskDirectory: String,
-          env: Map[String, String],
           conf: Map[String, String]
          ) = {
     val proc = os.proc(command).spawn(
-      cwd = os.Path(taskDirectory),
+      cwd = os.Path(projectDirectory),
       env = env)
     val lines = Source.fromInputStream(proc.stdout)("utf-8").getLines
     val childThreadException = new AtomicReference[Throwable](null)
@@ -64,7 +63,7 @@ class PythonProjectRunner extends Logging {
         val result = if (lines.hasNext) {
           true
         } else {
-          val exitStatus = try {
+          try {
             proc.waitFor()
           }
           catch {
@@ -72,8 +71,8 @@ class PythonProjectRunner extends Logging {
               0
           }
           cleanup()
-          if (exitStatus != 0) {
-            val msg = s"Subprocess exited with status $exitStatus. " +
+          if (proc.exitCode() != 0) {
+            val msg = s"Subprocess exited with status ${proc.exitCode()}. " +
               s"Command ran: " + command.mkString(" ")
             throw new IllegalStateException(msg)
           }
@@ -87,10 +86,10 @@ class PythonProjectRunner extends Logging {
         // cleanup task working directory if used
         scala.util.control.Exception.ignoring(classOf[IOException]) {
           if (conf.get(KEEP_LOCAL_DIR).map(_.toBoolean).getOrElse(false)) {
-            Utils.deleteRecursively(new File(taskDirectory))
+            Utils.deleteRecursively(new File(projectDirectory))
           }
         }
-        log.debug(s"Removed task working directory $taskDirectory")
+        log.debug(s"Removed task working directory $projectDirectory")
       }
 
       private def propagateChildException(): Unit = {
