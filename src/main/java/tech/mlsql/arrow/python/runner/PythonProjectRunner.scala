@@ -3,6 +3,7 @@ package tech.mlsql.arrow.python.runner
 import java.io._
 import java.util.concurrent.atomic.AtomicReference
 
+import os.SubProcess
 import tech.mlsql.arrow.Utils
 import tech.mlsql.common.utils.log.Logging
 
@@ -16,12 +17,17 @@ class PythonProjectRunner(projectDirectory: String,
 
   import PythonProjectRunner._
 
+  private var innerProcess: Option[SubProcess] = None
+
+  def getPythonProcess = innerProcess
+
   def run(command: Seq[String],
           conf: Map[String, String]
          ) = {
     val proc = os.proc(command).spawn(
       cwd = os.Path(projectDirectory),
       env = env)
+    innerProcess = Option(proc)
     val lines = Source.fromInputStream(proc.stdout)("utf-8").getLines
     val childThreadException = new AtomicReference[Throwable](null)
     // Start a thread to print the process's stderr to ours

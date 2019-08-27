@@ -5,8 +5,8 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>tech.mlsql</groupId>
-    <artifactId>pyjava-2.3_2.11</artifactId>
-    <version>0.1.2</version>
+    <artifactId>pyjava-2.4_2.11</artifactId>
+    <version>0.2.0</version>
     <name>pyjava with arrow support</name>
     <url>https://github.com/allwefantasy/pyjava</url>
     <description>
@@ -54,7 +54,7 @@
         <serviceframework.version>2.0.0</serviceframework.version>
         <scope>provided</scope>
         <hadoop-client-version>2.6.5</hadoop-client-version>
-        <common-utils-version>0.1.7</common-utils-version>
+        <common-utils-version>0.1.8</common-utils-version>
     </properties>
 
     <dependencies>
