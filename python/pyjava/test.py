@@ -1,5 +1,4 @@
 from pyjava.api.mlsql import PythonContext
-
 from pyjava.serializers import \
     ArrowStreamPandasSerializer
 
@@ -12,24 +11,15 @@ input_data = [dict([('id', [9, 10, 11, 12, 13, 14]),
 data_manager = PythonContext(input_data, conf)
 
 
-def gen(_data_manager):
-    for item in input_data:
-        idCol = item["id"]
-        contentCol = item["content"]
-        labelCol = item["label"]
-        yield [{"id": idCol[i] + 1, "content": contentCol[i], "label": labelCol[i]} for i in range(len(idCol))]
+def process():
+    for item in data_manager.fetch_once_as_rows():
+        item["label"] = item["label"] + 1
+        yield item
 
 
-def outputdata(blocks):
-    for block in blocks:
-        import pandas as pd
-        wow = pd.DataFrame(block)
-        yield [wow['id'], wow['label']]
+items = process()
 
-
-buffer = outputdata(gen(data_manager))
-data_manager.have_fetched = True
-data_manager.set_output(buffer)
+data_manager.build_result(items, 1024)
 outfile = open("/tmp/test.txt", "wb")
 out_ser.dump_stream(data_manager.output(), outfile)
 outfile.close()
