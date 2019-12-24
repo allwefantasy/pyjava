@@ -26,6 +26,7 @@ try:
     import resource
 except ImportError:
     has_resource_module = False
+
 import traceback
 
 from pyjava.serializers import \
@@ -57,6 +58,10 @@ def chain(f, g):
 
 def main(infile, outfile):
     try:
+        try:
+            import ray
+        except ImportError:
+            pass
         # set up memory limits
         memory_limit_mb = int(os.environ.get('PY_EXECUTOR_MEMORY', "-1"))
         if memory_limit_mb > 0 and has_resource_module:
@@ -103,19 +108,17 @@ def main(infile, outfile):
         def process():
             input_data = ser.load_stream(infile)
             code = compile(command, '<string>', 'exec')
-
             if is_interactive:
                 global data_manager
                 global context
                 data_manager = PythonContext(input_data, conf)
                 context = data_manager
                 global globals_namespace
-                exec (code, globals_namespace, globals_namespace)
+                exec(code, globals_namespace, globals_namespace)
             else:
                 data_manager = PythonContext(input_data, conf)
                 n_local = {"data_manager": data_manager, "context": data_manager}
-                g_local = {}
-                exec (code, g_local, n_local)
+                exec(code, n_local, n_local)
             out_iter = data_manager.output()
             try:
                 write_int(SpecialLengths.START_ARROW_STREAM, outfile)

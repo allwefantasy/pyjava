@@ -1,12 +1,24 @@
+import os
+import socket
 import sys
+
+import pandas as pd
+
+from pyjava.serializers import ArrowStreamPandasSerializer
+from pyjava.serializers import read_int
+from pyjava.utils import utf8_deserializer
 
 if sys.version >= '3':
     basestring = str
 else:
     pass
-from pyjava.serializers import read_int
-from pyjava.utils import utf8_deserializer
-import pandas as pd
+
+
+class DataServer(object):
+    def __init__(self, host: str, port: int, timezone: str):
+        self.host = host
+        self.port = port
+        self.timezone = timezone
 
 
 class PythonContext(object):
@@ -17,6 +29,8 @@ class PythonContext(object):
         self.conf = conf
         self.schema = ""
         self.have_fetched = False
+        if conf["pythonMode"] == "ray":
+            self.rayContext = RayContext(self)
 
     def set_output(self, value, schema=""):
         self.output_data = value
@@ -84,3 +98,26 @@ class PythonProjectContext(object):
 
     def output_model_dir(self):
         return self.conf["tempModelLocalPath"]
+
+
+class RayContext(object):
+
+    def __init__(self, python_context: PythonContext):
+        self.python_context = python_context
+        self.servers = []
+        for item in self.python_context.fetch_once_as_rows():
+            self.servers.append(DataServer(item["host"], int(item["port"]), item["timezone"]))
+
+    def data_servers(self):
+        return self.servers
+
+    @staticmethod
+    def fetch_data_from_single_data_server(data_server: DataServer):
+        out_ser = ArrowStreamPandasSerializer(data_server.timezone, True, True)
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.connect((data_server.host, data_server.port))
+            buffer_size = int(os.environ.get("BUFFER_SIZE", 65536))
+            infile = os.fdopen(os.dup(sock.fileno()), "rb", buffer_size)
+            result = out_ser.load_stream(infile)
+            for items in result:
+                yield items

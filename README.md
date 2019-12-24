@@ -153,4 +153,50 @@ val output = runner.run(Seq("bash", "-c", "source activate streamingpro-spark-2.
 output.foreach(println)
 ```
 
+## Arrow Server/Client
+
+Server side:
+
+```scala
+val socketRunner = new SparkSocketRunner("wow", NetUtils.getHost, "Asia/Harbin")
+
+val dataSchema = StructType(Seq(StructField("value", StringType)))
+val enconder = RowEncoder.apply(dataSchema).resolveAndBind()
+val newIter = Seq(Row.fromSeq(Seq("a1")), Row.fromSeq(Seq("a2"))).map { irow =>
+  enconder.toRow(irow)
+}.iterator
+val javaConext = new JavaContext
+val commonTaskContext = new AppContextImpl(javaConext, null)
+
+val Array(_, host, port) = socketRunner.serveToStreamWithArrow(newIter, dataSchema, 10, commonTaskContext)
+println(s"${host}:${port}")
+Thread.currentThread().join()
+```   
+
+Client side:
+
+```python  
+import os
+import socket
+
+from pyjava.serializers import \
+    ArrowStreamPandasSerializer
+
+out_ser = ArrowStreamPandasSerializer(None, True, True)
+
+out_ser = ArrowStreamPandasSerializer("Asia/Harbin", False, None)
+HOST = ""
+PORT = -1
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    sock.connect((HOST, PORT))
+    buffer_size = int(os.environ.get("SPARK_BUFFER_SIZE", 65536))
+    infile = os.fdopen(os.dup(sock.fileno()), "rb", buffer_size)
+    outfile = os.fdopen(os.dup(sock.fileno()), "wb", buffer_size)
+    kk = out_ser.load_stream(infile)
+    for item in kk:
+        print(item)
+```
+
 ## How to configure python worker runs in Docker (todo)
+
+

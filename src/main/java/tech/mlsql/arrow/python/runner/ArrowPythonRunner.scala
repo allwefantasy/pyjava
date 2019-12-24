@@ -16,8 +16,8 @@ import scala.collection.JavaConverters._
 
 
 /**
-  * Similar to `PythonUDFRunner`, but exchange data with Python worker via Arrow stream.
-  */
+ * Similar to `PythonUDFRunner`, but exchange data with Python worker via Arrow stream.
+ */
 class ArrowPythonRunner(
                          funcs: Seq[ChainedPythonFunctions],
                          schema: StructType,
@@ -133,13 +133,24 @@ class ArrowPythonRunner(
           } else {
             stream.readInt() match {
               case SpecialLengths.START_ARROW_STREAM =>
+                // it would be empty
                 reader = new ArrowStreamReader(stream, allocator)
-                root = reader.getVectorSchemaRoot()
-                schema = ArrowUtils.fromArrowSchema(root.getSchema())
-                vectors = root.getFieldVectors().asScala.map { vector =>
-                  new ArrowColumnVector(vector)
-                }.toArray[ColumnVector]
-                read()
+                root = try {
+                  reader.getVectorSchemaRoot()
+                } catch {
+                  case e: java.lang.IllegalArgumentException =>
+                    reader = null
+                    handleEndOfDataSection()
+                    null
+                }
+                if (root != null) {
+                  schema = ArrowUtils.fromArrowSchema(root.getSchema())
+                  vectors = root.getFieldVectors().asScala.map { vector =>
+                    new ArrowColumnVector(vector)
+                  }.toArray[ColumnVector]
+                  read()
+                } else null
+
 
               case SpecialLengths.PYTHON_EXCEPTION_THROWN =>
                 throw handlePythonException()
