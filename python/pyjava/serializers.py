@@ -252,7 +252,6 @@ class ArrowStreamPandasSerializer(ArrowStreamSerializer):
                 (len(series) == 2 and isinstance(series[1], pa.DataType)):
             series = [series]
         series = ((s, None) if not isinstance(s, (list, tuple)) else s for s in series)
-        print(series)
 
         def create_array(s, t):
             mask = s.isnull()
@@ -300,6 +299,12 @@ class ArrowStreamPandasSerializer(ArrowStreamSerializer):
         """
         Make ArrowRecordBatches from Pandas Series and serialize. Input is a single series or
         a list of series accompanied by an optional pyarrow type to coerce the data to.
+        [
+          [[column1 values],[column2 values]] #batch_0
+          [[column1 values],[column2 values]] #batch_2
+          ....
+          [[column1 values],[column2 values]] #batch_n
+        ]
         """
         batches = (self._create_batch(series) for series in iterator)
         super(ArrowStreamPandasSerializer, self).dump_stream(batches, stream)

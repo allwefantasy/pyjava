@@ -29,7 +29,7 @@ class PythonContext(object):
         self.conf = conf
         self.schema = ""
         self.have_fetched = False
-        if conf["pythonMode"] == "ray":
+        if "pythonMode" in conf and conf["pythonMode"] == "ray":
             self.rayContext = RayContext(self)
 
     def set_output(self, value, schema=""):
