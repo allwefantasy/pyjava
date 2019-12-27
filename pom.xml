@@ -6,7 +6,7 @@
 
     <groupId>tech.mlsql</groupId>
     <artifactId>pyjava-2.4_2.11</artifactId>
-    <version>0.2.0</version>
+    <version>0.2.3</version>
     <name>pyjava with arrow support</name>
     <url>https://github.com/allwefantasy/pyjava</url>
     <description>
@@ -55,6 +55,7 @@
         <scope>provided</scope>
         <hadoop-client-version>2.6.5</hadoop-client-version>
         <common-utils-version>0.1.8</common-utils-version>
+        <arrow.version>0.10.0</arrow.version>
     </properties>
 
     <dependencies>
@@ -78,7 +79,7 @@
         <dependency>
             <groupId>org.apache.arrow</groupId>
             <artifactId>arrow-vector</artifactId>
-            <version>0.12.0</version>
+            <version>${arrow.version}</version>
             <exclusions>
                 <exclusion>
                     <groupId>com.fasterxml.jackson.core</groupId>
@@ -105,7 +106,7 @@
         <dependency>
             <groupId>org.apache.arrow</groupId>
             <artifactId>arrow-memory</artifactId>
-            <version>0.12.0</version>
+            <version>${arrow.version}</version>
             <exclusions>
                 <exclusion>
                     <groupId>com.fasterxml.jackson.core</groupId>

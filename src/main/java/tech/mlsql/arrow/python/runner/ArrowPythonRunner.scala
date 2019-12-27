@@ -139,6 +139,7 @@ class ArrowPythonRunner(
                   reader.getVectorSchemaRoot()
                 } catch {
                   case e: java.lang.IllegalArgumentException =>
+                    logInfo("Arrow data may be empty",e)
                     reader = null
                     handleEndOfDataSection()
                     null
