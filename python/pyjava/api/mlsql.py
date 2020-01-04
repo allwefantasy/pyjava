@@ -102,7 +102,7 @@ class PythonProjectContext(object):
 
 class RayContext(object):
 
-    def __init__(self, python_context: PythonContext):
+    def __init__(self, python_context):
         self.python_context = python_context
         self.servers = []
         for item in self.python_context.fetch_once_as_rows():
@@ -112,7 +112,7 @@ class RayContext(object):
         return self.servers
 
     @staticmethod
-    def fetch_data_from_single_data_server(data_server: DataServer):
+    def fetch_data_from_single_data_server(data_server):
         out_ser = ArrowStreamPandasSerializer(data_server.timezone, True, True)
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.connect((data_server.host, data_server.port))

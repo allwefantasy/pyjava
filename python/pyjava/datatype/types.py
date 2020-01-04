@@ -29,9 +29,6 @@ if sys.version >= "3":
     long = int
     basestring = unicode = str
 
-from py4j.protocol import register_input_converter
-from py4j.java_gateway import JavaClass
-
 
 __all__ = [
     "DataType", "NullType", "StringType", "BinaryType", "BooleanType", "DateType",
@@ -1581,33 +1578,6 @@ class Row(tuple):
                                          for k, v in zip(self.__fields__, tuple(self)))
         else:
             return "<Row(%s)>" % ", ".join("%r" % field for field in self)
-
-
-class DateConverter(object):
-    def can_convert(self, obj):
-        return isinstance(obj, datetime.date)
-
-    def convert(self, obj, gateway_client):
-        Date = JavaClass("java.sql.Date", gateway_client)
-        return Date.valueOf(obj.strftime("%Y-%m-%d"))
-
-
-class DatetimeConverter(object):
-    def can_convert(self, obj):
-        return isinstance(obj, datetime.datetime)
-
-    def convert(self, obj, gateway_client):
-        Timestamp = JavaClass("java.sql.Timestamp", gateway_client)
-        seconds = (calendar.timegm(obj.utctimetuple()) if obj.tzinfo
-                   else time.mktime(obj.timetuple()))
-        t = Timestamp(int(seconds) * 1000)
-        t.setNanos(obj.microsecond * 1000)
-        return t
-
-
-# datetime is a subclass of date, we should register DatetimeConverter first
-register_input_converter(DatetimeConverter())
-register_input_converter(DateConverter())
 
 
 def to_arrow_type(dt):
