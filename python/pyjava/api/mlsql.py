@@ -1,10 +1,12 @@
 import os
 import socket
 import sys
+import uuid
 
 import pandas as pd
 
-from pyjava.serializers import ArrowStreamPandasSerializer
+import pyjava.utils as utils
+from pyjava.serializers import ArrowStreamSerializer
 from pyjava.serializers import read_int
 from pyjava.utils import utf8_deserializer
 
@@ -15,7 +17,7 @@ else:
 
 
 class DataServer(object):
-    def __init__(self, host: str, port: int, timezone: str):
+    def __init__(self, host, port, timezone):
         self.host = host
         self.port = port
         self.timezone = timezone
@@ -36,21 +38,23 @@ class PythonContext(object):
         self.output_data = value
         self.schema = schema
 
-    def _build_result(self, items, block_size=1024):
+    @staticmethod
+    def build_chunk_result(items, block_size=1024):
         buffer = []
         for item in items:
             buffer.append(item)
             if len(buffer) == block_size:
                 df = pd.DataFrame(buffer)
-                yield df
                 buffer.clear()
+                yield df
+
         if len(buffer) > 0:
             df = pd.DataFrame(buffer)
-            yield df
             buffer.clear()
+            yield df
 
     def build_result(self, items, block_size=1024):
-        self.output_data = ([df[name] for name in df] for df in self._build_result(items, block_size))
+        self.output_data = ([df[name] for name in df] for df in PythonContext.build_chunk_result(items, block_size))
 
     def output(self):
         return self.output_data
@@ -60,24 +64,25 @@ class PythonContext(object):
             pass
 
     def fetch_once_as_dataframe(self):
-        for items in self.fetch_once():
-            yield pd.DataFrame(items)
+        for df in self.fetch_once():
+            yield df
 
     def fetch_once_as_rows(self):
         for df in self.fetch_once_as_dataframe():
-            for index, row in df.iterrows():
+            for row in df.to_dict('records'):
                 yield row
 
     def fetch_once_as_batch_rows(self):
         for df in self.fetch_once_as_dataframe():
-            yield (row for index, row in df.iterrows())
+            yield (row for row in df.to_dict('records'))
 
     def fetch_once(self):
+        import pyarrow as pa
         if self.have_fetched:
             raise Exception("input data can only be fetched once")
         self.have_fetched = True
-        for item in self.input_data:
-            yield item.to_pydict()
+        for items in self.input_data:
+            yield pa.Table.from_batches([items]).to_pandas()
 
 
 class PythonProjectContext(object):
@@ -105,19 +110,69 @@ class RayContext(object):
     def __init__(self, python_context):
         self.python_context = python_context
         self.servers = []
+        self.server_ids_in_ray = []
+        self.is_setup = False
+        self.rds_list = []
+        self.is_dev = utils.is_dev()
         for item in self.python_context.fetch_once_as_rows():
+            self.server_ids_in_ray.append(str(uuid.uuid4()))
             self.servers.append(DataServer(item["host"], int(item["port"]), item["timezone"]))
 
     def data_servers(self):
         return self.servers
 
+    def data_servers_in_ray(self):
+        import ray
+        for server_id in self.server_ids_in_ray:
+            server = ray.experimental.get_actor(server_id)
+            yield ray.get(server.connect_info.remote())
+
+    def build_servers_in_ray(self):
+        import ray
+        from pyjava.api.serve import RayDataServer
+        buffer = []
+        for (server_id, java_server) in zip(self.server_ids_in_ray, self.servers):
+
+            rds = RayDataServer.options(name=server_id, detached=True, max_concurrency=2).remote(server_id, java_server,
+                                                                                                 0,
+                                                                                                 java_server.timezone)
+            self.rds_list.append(rds)
+            res = ray.get(rds.connect_info.remote())
+            if self.is_dev:
+                print("build RayDataServer server_id:{} java_server: {} servers:{}".format(server_id,
+                                                                                           str(vars(java_server)),
+                                                                                           str(vars(res))))
+            buffer.append(res)
+        return buffer
+
+    def setup(self, func_for_row):
+        if self.is_setup:
+            raise ValueError("setup can be only invoke once")
+        self.is_setup = True
+        import ray
+        buffer = []
+        for server_info in self.build_servers_in_ray():
+            server = ray.experimental.get_actor(server_info.server_id)
+            buffer.append(ray.get(server.connect_info.remote()))
+            server.serve.remote(func_for_row)
+
+        self.python_context.build_result([vars(server) for server in buffer], 1024)
+        return buffer
+
+    @staticmethod
+    def fetch_once_as_rows(data_server):
+        for df in RayContext.fetch_data_from_single_data_server(data_server):
+            for row in df.to_dict('records'):
+                yield row
+
     @staticmethod
     def fetch_data_from_single_data_server(data_server):
-        out_ser = ArrowStreamPandasSerializer(data_server.timezone, True, True)
+        out_ser = ArrowStreamSerializer()
+        import pyarrow as pa
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.connect((data_server.host, data_server.port))
             buffer_size = int(os.environ.get("BUFFER_SIZE", 65536))
             infile = os.fdopen(os.dup(sock.fileno()), "rb", buffer_size)
             result = out_ser.load_stream(infile)
             for items in result:
-                yield items
+                yield pa.Table.from_batches([items]).to_pandas()

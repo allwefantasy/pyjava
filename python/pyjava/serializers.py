@@ -192,18 +192,25 @@ class ArrowStreamSerializer(Serializer):
 
     def dump_stream(self, iterator, stream):
         import pyarrow as pa
+        import pyjava.utils as utils
+        is_dev = utils.is_dev()
 
-        print("----pyarrow version---")
-        print(pa.__version__)
+        if is_dev:
+            print("----pyarrow version---")
+            print(pa.__version__)
         writer = None
         try:
             for batch in iterator:
+                if is_dev:
+                    print(batch.to_pandas())
                 if writer is None:
                     writer = pa.RecordBatchStreamWriter(stream, batch.schema)
                 writer.write_batch(batch)
 
             # if iterator is empty, we should write default schema
             if writer is None:
+                if is_dev:
+                    print("----dump empty arrow---")
                 rb = pa.RecordBatch.from_arrays([[]], schema=pa.schema([('value', pa.string())]))
                 writer = pa.RecordBatchStreamWriter(stream, rb.schema)
                 writer.write_batch(rb)

@@ -13,6 +13,10 @@ pickleSer = PickleSerializer()
 utf8_deserializer = UTF8Deserializer()
 
 
+def is_dev():
+    return 'MLSQL_DEV' in os.environ and int(os.environ["MLSQL_DEV"]) == 1
+
+
 def require_minimum_pandas_version():
     """ Raise ImportError if minimum version of Pandas is not installed
     """
