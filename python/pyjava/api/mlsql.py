@@ -145,6 +145,13 @@ class RayContext(object):
             buffer.append(res)
         return buffer
 
+    @staticmethod
+    def connect(context, url):
+        import ray
+        ray.shutdown(exiting_interpreter=False)
+        ray.init(redis_address=url)
+        return context.rayContext
+
     def setup(self, func_for_row):
         if self.is_setup:
             raise ValueError("setup can be only invoke once")

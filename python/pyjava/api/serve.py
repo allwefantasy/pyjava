@@ -114,13 +114,13 @@ class RayDataServer(object):
             self.server.serve(data)
         except Exception:
             print(traceback.format_exc())
-            self.close()
         finally:
             self.close()
 
     def close(self):
         try:
             self.server.close()
+            ray.actor.exit_actor()
         except Exception:
             print(traceback.format_exc())
 

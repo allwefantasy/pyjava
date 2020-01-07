@@ -180,7 +180,7 @@ abstract class ReaderIterator[OUT](
            """.stripMargin)
     }
     try {
-      out.write(SpecialLengths.END_OF_STREAM)
+      out.writeInt(SpecialLengths.END_OF_STREAM)
       out.flush()
     } catch {
       case e: Exception => logError("", e)

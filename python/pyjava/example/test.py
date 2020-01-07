@@ -1,6 +1,9 @@
 from __future__ import absolute_import
 
+import ray
 from pyjava.api.mlsql import PythonContext
+
+ray.shutdown()
 
 data = [{'id': 9, 'content': '1', 'label': 0.0}]
 wow = PythonContext.build_chunk_result(data, 1024)
