@@ -133,25 +133,26 @@ class ArrowPythonRunner(
           } else {
             stream.readInt() match {
               case SpecialLengths.START_ARROW_STREAM =>
-                // it would be empty
-                reader = new ArrowStreamReader(stream, allocator)
-                root = try {
-                  reader.getVectorSchemaRoot()
-                } catch {
-                  case e: java.lang.IllegalArgumentException =>
-                    logInfo("Arrow data may be empty",e)
-                    reader = null
-                    handleEndOfDataSection()
-                    null
-                }
-                if (root != null) {
+                try {
+                  reader = new ArrowStreamReader(stream, allocator)
+                  root = reader.getVectorSchemaRoot()
                   schema = ArrowUtils.fromArrowSchema(root.getSchema())
                   vectors = root.getFieldVectors().asScala.map { vector =>
                     new ArrowColumnVector(vector)
                   }.toArray[ColumnVector]
                   read()
-                } else null
+                } catch {
+                  case e: IOException if (e.getMessage.contains("Missing schema") || e.getMessage.contains("Expected schema but header was")) =>
+                    logInfo("Arrow read schema fail", e)
+                    reader = null
+                    read()
+                }
 
+              case SpecialLengths.ARROW_STREAM_CRASH =>
+                read()
+
+              case SpecialLengths.PYTHON_EXCEPTION_THROWN =>
+                throw handlePythonException()
 
               case SpecialLengths.PYTHON_EXCEPTION_THROWN =>
                 throw handlePythonException()

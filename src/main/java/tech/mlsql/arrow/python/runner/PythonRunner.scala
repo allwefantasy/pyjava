@@ -129,9 +129,9 @@ abstract class BasePythonRunner[IN, OUT](
                                    context: CommonTaskContext): Iterator[OUT]
 
   /**
-    * The thread responsible for writing the data from the PythonRDD's parent iterator to the
-    * Python process.
-    */
+   * The thread responsible for writing the data from the PythonRDD's parent iterator to the
+   * Python process.
+   */
   abstract class WriterThread(
                                worker: Socket,
                                inputIterator: Iterator[IN],
@@ -153,13 +153,13 @@ abstract class BasePythonRunner[IN, OUT](
     }
 
     /**
-      * Writes a command section to the stream connected to the Python worker.
-      */
+     * Writes a command section to the stream connected to the Python worker.
+     */
     protected def writeCommand(dataOut: DataOutputStream): Unit
 
     /**
-      * Writes input data to the stream connected to the Python worker.
-      */
+     * Writes input data to the stream connected to the Python worker.
+     */
     protected def writeIteratorToStream(dataOut: DataOutputStream): Unit
 
     override def run(): Unit = Utils.logUncaughtExceptions {
@@ -257,8 +257,8 @@ abstract class BasePythonRunner[IN, OUT](
     }
 
     /**
-      * Gateway to call BarrierTaskContext.barrier().
-      */
+     * Gateway to call BarrierTaskContext.barrier().
+     */
     def barrierAndServe(sock: Socket): Unit = {
       require(serverSocket.isDefined, "No available ServerSocket to redirect the barrier() call.")
 
@@ -308,10 +308,10 @@ abstract class BasePythonRunner[IN, OUT](
     }
 
     /**
-      * Reads next object from the stream.
-      * When the stream reaches end of data, needs to process the following sections,
-      * and then returns null.
-      */
+     * Reads next object from the stream.
+     * When the stream reaches end of data, needs to process the following sections,
+     * and then returns null.
+     */
     protected def read(): OUT
 
 
@@ -366,10 +366,10 @@ abstract class BasePythonRunner[IN, OUT](
   }
 
   /**
-    * It is necessary to have a monitor thread for python workers if the user cancels with
-    * interrupts disabled. In that case we will need to explicitly kill the worker, otherwise the
-    * threads can block indefinitely.
-    */
+   * It is necessary to have a monitor thread for python workers if the user cancels with
+   * interrupts disabled. In that case we will need to explicitly kill the worker, otherwise the
+   * threads can block indefinitely.
+   */
   class MonitorThread(worker: Socket, context: CommonTaskContext, conf: Map[String, String])
     extends Thread(s"Worker Monitor for $pythonExec") {
 
@@ -387,6 +387,7 @@ abstract class BasePythonRunner[IN, OUT](
 
 
 object SpecialLengths {
+  val ARROW_STREAM_CRASH = 0
   val END_OF_DATA_SECTION = -1
   val PYTHON_EXCEPTION_THROWN = -2
   val TIMING_DATA = -3

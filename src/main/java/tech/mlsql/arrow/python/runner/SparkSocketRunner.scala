@@ -76,28 +76,27 @@ class SparkSocketRunner(runnerName: String, host: String, timeZoneId: String) {
           } else {
             stream.readInt() match {
               case SpecialLengths.START_ARROW_STREAM =>
-                // it would be empty
-                reader = new ArrowStreamReader(stream, allocator)
-                root = try {
-                  reader.getVectorSchemaRoot()
-                } catch {
-                  case e: java.lang.IllegalArgumentException =>
-                    logInfo("Arrow data may be empty", e)
-                    reader = null
-                    handleEndOfDataSection(outfile)
-                    null
-                }
-                if (root != null) {
+
+                try {
+                  reader = new ArrowStreamReader(stream, allocator)
+                  root = reader.getVectorSchemaRoot()
                   schema = ArrowUtils.fromArrowSchema(root.getSchema())
                   vectors = root.getFieldVectors().asScala.map { vector =>
                     new ArrowColumnVector(vector)
                   }.toArray[ColumnVector]
                   read()
-                } else null
+                } catch {
+                  case e: IOException if (e.getMessage.contains("Missing schema") || e.getMessage.contains("Expected schema but header was")) =>
+                    logInfo("Arrow read schema fail", e)
+                    reader = null
+                    read()
+                }
 
+              case SpecialLengths.ARROW_STREAM_CRASH =>
+                read()
 
               case SpecialLengths.PYTHON_EXCEPTION_THROWN =>
-                throw handlePythonException()
+                throw handlePythonException(outfile)
 
               case SpecialLengths.END_OF_DATA_SECTION =>
                 handleEndOfDataSection(outfile)
@@ -153,11 +152,17 @@ abstract class ReaderIterator[OUT](
   protected def read(): OUT
 
 
-  protected def handlePythonException(): SparkException = {
+  protected def handlePythonException(out: DataOutputStream): SparkException = {
     // Signals that an exception has been thrown in python
     val exLength = stream.readInt()
     val obj = new Array[Byte](exLength)
     stream.readFully(obj)
+    try {
+      out.writeInt(SpecialLengths.END_OF_STREAM)
+      out.flush()
+    } catch {
+      case e: Exception => logError("", e)
+    }
     new SparkException(new String(obj, StandardCharsets.UTF_8), null)
   }
 
@@ -193,7 +198,8 @@ abstract class ReaderIterator[OUT](
     case e: Exception if context.isTaskInterrupt()() =>
       logDebug("Exception thrown after task interruption", e)
       throw new TaskKilledException(context.getTaskKillReason()().getOrElse("unknown reason"))
-
+    case e: SparkException =>
+      throw e
     case eof: EOFException =>
       throw new SparkException("Python worker exited unexpectedly (crashed)", eof)
 
