@@ -114,11 +114,11 @@ def main(infile, outfile):
                 data_manager = PythonContext(input_data, conf)
                 context = data_manager
                 global globals_namespace
-                exec(code, globals_namespace, globals_namespace)
+                exec (code, globals_namespace, globals_namespace)
             else:
                 data_manager = PythonContext(input_data, conf)
                 n_local = {"data_manager": data_manager, "context": data_manager}
-                exec(code, n_local, n_local)
+                exec (code, n_local, n_local)
             out_iter = data_manager.output()
             try:
                 write_int(SpecialLengths.START_ARROW_STREAM, outfile)
@@ -131,6 +131,7 @@ def main(infile, outfile):
 
     except Exception:
         try:
+            write_int(SpecialLengths.ARROW_STREAM_CRASH, outfile)
             write_int(SpecialLengths.PYTHON_EXCEPTION_THROWN, outfile)
             write_with_length(traceback.format_exc().encode("utf-8"), outfile)
         except IOError:

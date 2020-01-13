@@ -70,10 +70,13 @@ class OnceServer(object):
             read_int(infile)
         except Exception:
             try:
+                write_int(SpecialLengths.ARROW_STREAM_CRASH, out)
                 ex = traceback.format_exc()
                 print(ex)
                 write_int(SpecialLengths.PYTHON_EXCEPTION_THROWN, out)
                 write_with_length(ex.encode("utf-8"), out)
+                out.flush()
+                read_int(infile)
             except IOError:
                 # JVM close the socket
                 pass
@@ -107,13 +110,15 @@ class RayDataServer(object):
         self.java_server = java_server
         self.is_dev = utils.is_dev()
 
-    def serve(self, func_for_row):
-
+    def serve(self, func_for_row=None, func_for_rows=None):
         try:
-            data = (func_for_row(item) for item in RayContext.fetch_once_as_rows(self.java_server))
+            if func_for_row is not None:
+                data = (func_for_row(item) for item in RayContext.fetch_once_as_rows(self.java_server))
+            elif func_for_rows is not None:
+                data = func_for_rows(RayContext.fetch_once_as_rows(self.java_server))
             self.server.serve(data)
-        except Exception:
-            print(traceback.format_exc())
+        except Exception as e:
+            raise e
         finally:
             self.close()
 

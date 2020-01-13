@@ -152,7 +152,7 @@ class RayContext(object):
         ray.init(redis_address=url)
         return context.rayContext
 
-    def setup(self, func_for_row):
+    def setup(self, func_for_row, func_for_rows=None):
         if self.is_setup:
             raise ValueError("setup can be only invoke once")
         self.is_setup = True
@@ -161,10 +161,25 @@ class RayContext(object):
         for server_info in self.build_servers_in_ray():
             server = ray.experimental.get_actor(server_info.server_id)
             buffer.append(ray.get(server.connect_info.remote()))
-            server.serve.remote(func_for_row)
+            server.serve.remote(func_for_row, func_for_rows)
 
         self.python_context.build_result([vars(server) for server in buffer], 1024)
         return buffer
+
+    def foreach(self, func_for_row):
+        return self.setup(func_for_row)
+
+    def map_iter(self, func_for_rows):
+        return self.setup(None, func_for_rows)
+
+    def collect(self):
+        for shard in self.data_servers():
+            for row in RayContext.fetch_once_as_rows(shard):
+                yield row
+
+    def to_pandas(self):
+        items = [row for row in self.collect()]
+        return pd.DataFrame(data=items)
 
     @staticmethod
     def fetch_once_as_rows(data_server):

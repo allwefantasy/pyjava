@@ -39,6 +39,7 @@ pickle_protocol = pickle.HIGHEST_PROTOCOL
 
 
 class SpecialLengths(object):
+    ARROW_STREAM_CRASH = 0
     END_OF_DATA_SECTION = -1
     PYTHON_EXCEPTION_THROWN = -2
     TIMING_DATA = -3
