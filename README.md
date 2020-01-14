@@ -216,7 +216,15 @@ server.serve([{'id': 9, 'label': 1}])
 
 Java Client side:
 
-```scala
+```scala      
+import org.apache.spark.sql.Row
+import org.apache.spark.sql.catalyst.encoders.RowEncoder
+import org.apache.spark.sql.types.{LongType, StringType, StructField, StructType}
+import org.scalatest.{BeforeAndAfterAll, FunSuite}
+import tech.mlsql.arrow.python.iapp.{AppContextImpl, JavaContext}
+import tech.mlsql.arrow.python.runner.SparkSocketRunner
+import tech.mlsql.common.utils.network.NetUtils
+
 val enconder = RowEncoder.apply(StructType(Seq(StructField("a", LongType),StructField("b", LongType)))).resolveAndBind()
 val socketRunner = new SparkSocketRunner("wow", NetUtils.getHost, "Asia/Harbin")
 val javaConext = new JavaContext
