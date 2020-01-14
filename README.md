@@ -155,7 +155,7 @@ output.foreach(println)
 
 ## Arrow Server/Client
 
-Server side:
+Java Server side:
 
 ```scala
 val socketRunner = new SparkSocketRunner("wow", NetUtils.getHost, "Asia/Harbin")
@@ -173,7 +173,7 @@ println(s"${host}:${port}")
 Thread.currentThread().join()
 ```   
 
-Client side:
+Python Client side:
 
 ```python  
 import os
@@ -195,6 +195,35 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
     kk = out_ser.load_stream(infile)
     for item in kk:
         print(item)
+``` 
+
+Python Server side:
+
+```python
+import os
+
+import pandas as pd
+
+os.environ["ARROW_PRE_0_15_IPC_FORMAT"] = "1"
+from pyjava.api.serve import OnceServer
+
+ddata = pd.DataFrame(data=[[1, 2, 3, 4], [2, 3, 4, 5]])
+
+server = OnceServer("127.0.0.1", 11111, "Asia/Harbin")
+server.bind()
+server.serve([{'id': 9, 'label': 1}])
+```     
+
+Java Client side:
+
+```scala
+val enconder = RowEncoder.apply(StructType(Seq(StructField("a", LongType),StructField("b", LongType)))).resolveAndBind()
+val socketRunner = new SparkSocketRunner("wow", NetUtils.getHost, "Asia/Harbin")
+val javaConext = new JavaContext
+val commonTaskContext = new AppContextImpl(javaConext, null)
+val iter = socketRunner.readFromStreamWithArrow("127.0.0.1", 11111, commonTaskContext)
+iter.foreach(i => println(enconder.fromRow(i.copy())))
+javaConext.close
 ```
 
 ## How to configure python worker runs in Docker (todo)
