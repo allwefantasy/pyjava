@@ -10,8 +10,8 @@ import tech.mlsql.common.utils.log.Logging
 import scala.io.Source
 
 /**
-  * 2019-08-22 WilliamZhu(allwefantasy@gmail.com)
-  */
+ * 2019-08-22 WilliamZhu(allwefantasy@gmail.com)
+ */
 class PythonProjectRunner(projectDirectory: String,
                           env: Map[String, String]) extends Logging {
 
@@ -28,7 +28,7 @@ class PythonProjectRunner(projectDirectory: String,
       cwd = os.Path(projectDirectory),
       env = env)
     innerProcess = Option(proc)
-    val lines = Source.fromInputStream(proc.stdout)("utf-8").getLines
+    val lines = Source.fromInputStream(proc.stdout.wrapped)("utf-8").getLines
     val childThreadException = new AtomicReference[Throwable](null)
     // Start a thread to print the process's stderr to ours
     new Thread(s"stdin writer for $command") {
@@ -53,7 +53,15 @@ class PythonProjectRunner(projectDirectory: String,
     }.start()
 
     // redirect err to other place(e.g. send them to driver)
-    Utils.redirectStream(conf, proc.stderr)
+    if (conf.getOrElse("throwErr", "true").toBoolean) {
+      val err = proc.stderr.lines.mkString("\n")
+      if (!err.isEmpty) {
+        proc.close()
+        throw new PythonErrException(err)
+      }
+    } else {
+      Utils.redirectStream(conf, proc.stderr)
+    }
 
 
     new Iterator[String] {
@@ -113,4 +121,10 @@ class PythonProjectRunner(projectDirectory: String,
 
 object PythonProjectRunner {
   val KEEP_LOCAL_DIR = "keepLocalDir"
+}
+
+class PythonErrException (message: String, cause: Throwable)
+  extends Exception(message, cause) {
+
+  def this(message: String) = this(message, null)
 }

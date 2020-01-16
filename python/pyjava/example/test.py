@@ -2,6 +2,8 @@ from __future__ import absolute_import
 
 import ray
 from pyjava.api.mlsql import PythonContext
+from pyjava.api import is_in_mlsql
+
 
 ray.shutdown()
 

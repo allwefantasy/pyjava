@@ -114,6 +114,8 @@ class RayContext(object):
         self.is_setup = False
         self.rds_list = []
         self.is_dev = utils.is_dev()
+        self.is_in_mlsql = True
+        self.mock_data = []
         for item in self.python_context.fetch_once_as_rows():
             self.server_ids_in_ray.append(str(uuid.uuid4()))
             self.servers.append(DataServer(item["host"], int(item["port"]), item["timezone"]))
@@ -146,7 +148,22 @@ class RayContext(object):
         return buffer
 
     @staticmethod
-    def connect(context, url):
+    def connect(_context, url):
+
+        if isinstance(_context, PythonContext):
+            context = _context
+        elif isinstance(_context, dict):
+            if 'context' in _context:
+                context = _context['context']
+            else:
+                '''
+                we are not in MLSQL
+                '''
+                context = PythonContext([], {"pythonMode": "ray"})
+                context.rayContext.is_in_mlsql = False
+        else:
+            raise Exception("context is not set")
+
         import ray
         ray.shutdown(exiting_interpreter=False)
         ray.init(redis_address=url)
@@ -157,6 +174,20 @@ class RayContext(object):
             raise ValueError("setup can be only invoke once")
         self.is_setup = True
         import ray
+
+        if not self.is_in_mlsql:
+            if func_for_rows is not None:
+                func = ray.remote(func_for_rows)
+                return ray.get(func.remote(self.mock_data))
+            else:
+                func = ray.remote(func_for_row)
+
+                def iter_all(rows):
+                    return [ray.get(func.remote(row)) for row in rows]
+
+                iter_all_func = ray.remote(iter_all)
+                return ray.get(iter_all_func.remote(self.mock_data))
+
         buffer = []
         for server_info in self.build_servers_in_ray():
             server = ray.experimental.get_actor(server_info.server_id)
