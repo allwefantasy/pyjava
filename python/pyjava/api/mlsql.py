@@ -23,18 +23,9 @@ class DataServer(object):
         self.timezone = timezone
 
 
-class PythonContext(object):
-    cache = {}
-
-    def __init__(self, iterator, conf):
-        self.input_data = iterator
-        self.output_data = [[]]
+class LogClient(object):
+    def __init__(self, conf):
         self.conf = conf
-        self.schema = ""
-        self.have_fetched = False
-        if "pythonMode" in conf and conf["pythonMode"] == "ray":
-            self.rayContext = RayContext(self)
-
         self.log_host = self.conf['spark.mlsql.log.driver.host']
         self.log_port = self.conf['spark.mlsql.log.driver.port']
         self.log_user = self.conf['PY_EXECUTE_USER']
@@ -50,10 +41,6 @@ class PythonContext(object):
             self.outfile = os.fdopen(
                 os.dup(self.conn.fileno()), "wb", buffer_size)
 
-    def set_output(self, value, schema=""):
-        self.output_data = value
-        self.schema = schema
-
     def log_to_driver(self, msg):
         if not self.log_host:
             print(msg)
@@ -66,6 +53,29 @@ class PythonContext(object):
                 "logLine": "[owner] [{}] [groupId] [{}] {}".format(self.log_user, self.log_group_id, msg)
             }}, ensure_ascii=False)
         write_bytes_with_length(resp, self.outfile)
+
+    def close(self):
+        if self.conn:
+            self.conn.close()
+            self.conn = None
+
+
+class PythonContext(object):
+    cache = {}
+
+    def __init__(self, iterator, conf):
+        self.input_data = iterator
+        self.output_data = [[]]
+        self.conf = conf
+        self.schema = ""
+        self.have_fetched = False
+        if "pythonMode" in conf and conf["pythonMode"] == "ray":
+            self.rayContext = RayContext(self)
+        self.log_client = LogClient(self.conf)
+
+    def set_output(self, value, schema=""):
+        self.output_data = value
+        self.schema = schema
 
     @staticmethod
     def build_chunk_result(items, block_size=1024):
@@ -90,9 +100,7 @@ class PythonContext(object):
         return self.output_data
 
     def __del__(self):
-        if self.conn:
-            self.conn.close()
-            self.conn = None
+        self.log_client.close()
 
     def noops_fetch(self):
         for item in self.fetch_once():
@@ -125,21 +133,7 @@ class PythonProjectContext(object):
         self.params_read = False
         self.conf = {}
         self.read_params_once()
-        self.log_host = self.conf['spark.mlsql.log.driver.host']
-        self.log_port = self.conf['spark.mlsql.log.driver.port']
-        self.log_user = self.conf['PY_EXECUTE_USER']
-        self.log_token = self.conf['spark.mlsql.log.driver.token']
-        self.log_group_id = self.conf['groupId']
-        print(self.log_host)
-        if self.log_host:
-            import socket
-            self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.conn.connect((self.log_host, int(self.log_port)))
-            buffer_size = int(os.environ.get("SPARK_BUFFER_SIZE", 256))
-            self.infile = os.fdopen(
-                os.dup(self.conn.fileno()), "rb", buffer_size)
-            self.outfile = os.fdopen(
-                os.dup(self.conn.fileno()), "wb", buffer_size)
+        self.log_client = LogClient(self.conf)        
 
     def read_params_once(self):
         if not self.params_read:
@@ -156,23 +150,8 @@ class PythonProjectContext(object):
     def output_model_dir(self):
         return self.conf["tempModelLocalPath"]
 
-    def log_to_driver(self, msg):
-        if not self.log_host:
-            print(msg)
-            return
-        from pyjava.serializers import write_bytes_with_length
-        import json
-        resp = json.dumps(
-            {"sendLog": {
-                "token": self.log_token,
-                "logLine": "[owner] [{}] [groupId] [{}] {}".format(self.log_user, self.log_group_id, msg)
-            }}, ensure_ascii=False)
-        write_bytes_with_length(resp, self.outfile)
-
     def __del__(self):
-        if self.conn:
-            self.conn.close()
-            self.conn = None
+        self.log_client.close()
 
 
 class RayContext(object):
