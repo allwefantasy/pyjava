@@ -797,6 +797,11 @@ def write_with_length(obj, stream):
     write_int(len(obj), stream)
     stream.write(obj)
 
+def write_bytes_with_length(obj,stream):
+    byte_array = obj.encode("utf-8")
+    write_int(len(byte_array), stream)
+    stream.write(byte_array)       
+
 
 class ChunkedStream(object):
     """

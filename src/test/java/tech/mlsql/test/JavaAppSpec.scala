@@ -14,13 +14,13 @@ import tech.mlsql.common.utils.lang.sc.ScalaMethodMacros.str
 import scala.collection.JavaConverters._
 
 /**
-  * 2019-08-15 WilliamZhu(allwefantasy@gmail.com)
-  */
+ * 2019-08-15 WilliamZhu(allwefantasy@gmail.com)
+ */
 class JavaAppSpec extends FunSuite
   with BeforeAndAfterAll {
   test("normal java application") {
     val envs = new util.HashMap[String, String]()
-    envs.put(str(PythonConf.PYTHON_ENV), "source activate streamingpro-spark-2.4.x")
+    envs.put(str(PythonConf.PYTHON_ENV), "source activate streamingpro-spark-2.4.x && export ARROW_PRE_0_15_IPC_FORMAT=1 ")
 
     val dataSchema = StructType(Seq(StructField("value", StringType)))
     val enconder = RowEncoder.apply(dataSchema).resolveAndBind()
@@ -29,7 +29,7 @@ class JavaAppSpec extends FunSuite
         """
           |import pandas as pd
           |import numpy as np
-          |for item in data_manager.fetch_once():
+          |for item in data_manager.fetch_once_as_rows():
           |    print(item)
           |df = pd.DataFrame({'AAA': [4, 5, 6, 7],'BBB': [10, 20, 30, 40],'CCC': [100, 50, -30, -50]})
           |data_manager.set_output([[df['AAA'],df['BBB']]])
@@ -37,8 +37,9 @@ class JavaAppSpec extends FunSuite
       "GMT", Map()
     )
     val newIter = Seq(Row.fromSeq(Seq("a1")), Row.fromSeq(Seq("a2"))).map { irow =>
-      enconder.toRow(irow)
+      enconder.toRow(irow).copy()
     }.iterator
+
     val javaConext = new JavaContext
     val commonTaskContext = new AppContextImpl(javaConext, batch)
     val columnarBatchIter = batch.compute(Iterator(newIter), TaskContext.getPartitionId(), commonTaskContext)

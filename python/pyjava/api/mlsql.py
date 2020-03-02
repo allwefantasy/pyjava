@@ -24,6 +24,7 @@ class DataServer(object):
 
 
 class PythonContext(object):
+    cache = {}
 
     def __init__(self, iterator, conf):
         self.input_data = iterator
@@ -34,9 +35,37 @@ class PythonContext(object):
         if "pythonMode" in conf and conf["pythonMode"] == "ray":
             self.rayContext = RayContext(self)
 
+        self.log_host = self.conf['spark.mlsql.log.driver.host']
+        self.log_port = self.conf['spark.mlsql.log.driver.port']
+        self.log_user = self.conf['PY_EXECUTE_USER']
+        self.log_token = self.conf['spark.mlsql.log.driver.token']
+        self.log_group_id = self.conf['groupId']
+        if self.log_host:
+            import socket
+            self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.conn.connect((self.log_host, int(self.log_port)))
+            buffer_size = int(os.environ.get("SPARK_BUFFER_SIZE", 256))
+            self.infile = os.fdopen(
+                os.dup(self.conn.fileno()), "rb", buffer_size)
+            self.outfile = os.fdopen(
+                os.dup(self.conn.fileno()), "wb", buffer_size)
+
     def set_output(self, value, schema=""):
         self.output_data = value
         self.schema = schema
+
+    def log_to_driver(self, msg):
+        if not self.log_host:
+            print(msg)
+            return
+        from pyjava.serializers import write_bytes_with_length
+        import json
+        resp = json.dumps(
+            {"sendLog": {
+                "token": self.log_token,
+                "logLine": "[owner] [{}] [groupId] [{}] {}".format(self.log_user, self.log_group_id, msg)
+            }}, ensure_ascii=False)
+        write_bytes_with_length(resp, self.outfile)
 
     @staticmethod
     def build_chunk_result(items, block_size=1024):
@@ -54,10 +83,16 @@ class PythonContext(object):
             yield df
 
     def build_result(self, items, block_size=1024):
-        self.output_data = ([df[name] for name in df] for df in PythonContext.build_chunk_result(items, block_size))
+        self.output_data = ([df[name] for name in df]
+                            for df in PythonContext.build_chunk_result(items, block_size))
 
     def output(self):
         return self.output_data
+
+    def __del__(self):
+        if self.conn:
+            self.conn.close()
+            self.conn = None
 
     def noops_fetch(self):
         for item in self.fetch_once():
@@ -89,14 +124,31 @@ class PythonProjectContext(object):
     def __init__(self):
         self.params_read = False
         self.conf = {}
+        self.read_params_once()
+        self.log_host = self.conf['spark.mlsql.log.driver.host']
+        self.log_port = self.conf['spark.mlsql.log.driver.port']
+        self.log_user = self.conf['PY_EXECUTE_USER']
+        self.log_token = self.conf['spark.mlsql.log.driver.token']
+        self.log_group_id = self.conf['groupId']
+        print(self.log_host)
+        if self.log_host:
+            import socket
+            self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.conn.connect((self.log_host, int(self.log_port)))
+            buffer_size = int(os.environ.get("SPARK_BUFFER_SIZE", 256))
+            self.infile = os.fdopen(
+                os.dup(self.conn.fileno()), "rb", buffer_size)
+            self.outfile = os.fdopen(
+                os.dup(self.conn.fileno()), "wb", buffer_size)
 
     def read_params_once(self):
-        self.params_read = True
-        infile = sys.stdin.buffer
-        for i in range(read_int(infile)):
-            k = utf8_deserializer.loads(infile)
-            v = utf8_deserializer.loads(infile)
-            self.conf[k] = v
+        if not self.params_read:
+            self.params_read = True
+            infile = sys.stdin.buffer
+            for i in range(read_int(infile)):
+                k = utf8_deserializer.loads(infile)
+                v = utf8_deserializer.loads(infile)
+                self.conf[k] = v
 
     def input_data_dir(self):
         return self.conf["tempDataLocalPath"]
@@ -104,8 +156,27 @@ class PythonProjectContext(object):
     def output_model_dir(self):
         return self.conf["tempModelLocalPath"]
 
+    def log_to_driver(self, msg):
+        if not self.log_host:
+            print(msg)
+            return
+        from pyjava.serializers import write_bytes_with_length
+        import json
+        resp = json.dumps(
+            {"sendLog": {
+                "token": self.log_token,
+                "logLine": "[owner] [{}] [groupId] [{}] {}".format(self.log_user, self.log_group_id, msg)
+            }}, ensure_ascii=False)
+        write_bytes_with_length(resp, self.outfile)
+
+    def __del__(self):
+        if self.conn:
+            self.conn.close()
+            self.conn = None
+
 
 class RayContext(object):
+    cache = {}
 
     def __init__(self, python_context):
         self.python_context = python_context
@@ -118,7 +189,8 @@ class RayContext(object):
         self.mock_data = []
         for item in self.python_context.fetch_once_as_rows():
             self.server_ids_in_ray.append(str(uuid.uuid4()))
-            self.servers.append(DataServer(item["host"], int(item["port"]), item["timezone"]))
+            self.servers.append(DataServer(
+                item["host"], int(item["port"]), item["timezone"]))
 
     def data_servers(self):
         return self.servers
@@ -142,7 +214,8 @@ class RayContext(object):
             res = ray.get(rds.connect_info.remote())
             if self.is_dev:
                 print("build RayDataServer server_id:{} java_server: {} servers:{}".format(server_id,
-                                                                                           str(vars(java_server)),
+                                                                                           str(vars(
+                                                                                               java_server)),
                                                                                            str(vars(res))))
             buffer.append(res)
         return buffer
@@ -194,7 +267,8 @@ class RayContext(object):
             buffer.append(ray.get(server.connect_info.remote()))
             server.serve.remote(func_for_row, func_for_rows)
 
-        self.python_context.build_result([vars(server) for server in buffer], 1024)
+        self.python_context.build_result(
+            [vars(server) for server in buffer], 1024)
         return buffer
 
     def foreach(self, func_for_row):
