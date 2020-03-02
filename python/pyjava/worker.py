@@ -83,8 +83,7 @@ def main(infile, outfile):
 
             except (resource.error, OSError, ValueError) as e:
                 # not all systems support resource limits, so warn instead of failing
-                print("WARN: Failed to set memory limit: {0}\n".format(e), file=sys.stderr)
-
+                print("WARN: Failed to set memory limit: {0}\n".format(e), file=sys.stderr)        
         split_index = read_int(infile)
         print("split_index:%s" % split_index)
         if split_index == -1:  # for unit tests

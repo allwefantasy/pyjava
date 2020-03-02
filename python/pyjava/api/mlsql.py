@@ -26,12 +26,12 @@ class DataServer(object):
 class LogClient(object):
     def __init__(self, conf):
         self.conf = conf
-        self.log_host = self.conf['spark.mlsql.log.driver.host']
-        self.log_port = self.conf['spark.mlsql.log.driver.port']
-        self.log_user = self.conf['PY_EXECUTE_USER']
-        self.log_token = self.conf['spark.mlsql.log.driver.token']
-        self.log_group_id = self.conf['groupId']
-        if self.log_host:
+        if 'spark.mlsql.log.driver.host' in self.conf:
+            self.log_host = self.conf['spark.mlsql.log.driver.host']
+            self.log_port = self.conf['spark.mlsql.log.driver.port']
+            self.log_user = self.conf['PY_EXECUTE_USER']
+            self.log_token = self.conf['spark.mlsql.log.driver.token']
+            self.log_group_id = self.conf['groupId']        
             import socket
             self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.conn.connect((self.log_host, int(self.log_port)))
@@ -54,8 +54,8 @@ class LogClient(object):
             }}, ensure_ascii=False)
         write_bytes_with_length(resp, self.outfile)
 
-    def close(self):
-        if self.conn:
+    def close(self):        
+        if hasattr(self,"conn"):
             self.conn.close()
             self.conn = None
 
@@ -69,9 +69,10 @@ class PythonContext(object):
         self.conf = conf
         self.schema = ""
         self.have_fetched = False
+        self.log_client = LogClient(self.conf)
         if "pythonMode" in conf and conf["pythonMode"] == "ray":
             self.rayContext = RayContext(self)
-        self.log_client = LogClient(self.conf)
+        
 
     def set_output(self, value, schema=""):
         self.output_data = value
@@ -245,9 +246,8 @@ class RayContext(object):
             server = ray.experimental.get_actor(server_info.server_id)
             buffer.append(ray.get(server.connect_info.remote()))
             server.serve.remote(func_for_row, func_for_rows)
-
-        self.python_context.build_result(
-            [vars(server) for server in buffer], 1024)
+        items =  [vars(server) for server in buffer]
+        self.python_context.build_result(items, 1024)           
         return buffer
 
     def foreach(self, func_for_row):

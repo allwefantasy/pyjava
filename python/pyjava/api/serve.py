@@ -1,3 +1,4 @@
+import ray
 import os
 import socket
 import traceback
@@ -51,16 +52,18 @@ class OnceServer(object):
     def serve(self, data):
         from pyjava.api.mlsql import PythonContext
         if not self.is_bind:
-            raise SocketNotBindException("Please invoke server.bind() before invoke server.serve")
+            raise SocketNotBindException(
+                "Please invoke server.bind() before invoke server.serve")
         conn, addr = self.socket.accept()
-        sockfile = conn.makefile("rwb", int(os.environ.get("BUFFER_SIZE", 65536)))
+        sockfile = conn.makefile("rwb", int(
+            os.environ.get("BUFFER_SIZE", 65536)))
         infile = sockfile  # os.fdopen(os.dup(conn.fileno()), "rb", 65536)
         out = sockfile  # os.fdopen(os.dup(conn.fileno()), "wb", 65536)
         try:
-            write_int(SpecialLengths.START_ARROW_STREAM, out)
-            self.out_ser.dump_stream(([df[name] for name in df] for df in
-                                      PythonContext.build_chunk_result(data, 1024)),
-                                     out)
+            write_int(SpecialLengths.START_ARROW_STREAM, out)            
+            out_data = ([df[name] for name in df] for df in
+                    PythonContext.build_chunk_result(data, 1024))                  
+            self.out_ser.dump_stream(out_data, out)
 
             write_int(SpecialLengths.END_OF_DATA_SECTION, out)
             write_int(SpecialLengths.END_OF_STREAM, out)
@@ -89,15 +92,13 @@ class OnceServer(object):
         conn.close()
 
 
-import ray
-
-
 @ray.remote
 class RayDataServer(object):
 
     def __init__(self, server_id, java_server, port=0, timezone="Asia/Harbin"):
 
-        self.server = OnceServer(self.get_address(), port, java_server.timezone)
+        self.server = OnceServer(
+            self.get_address(), port, java_server.timezone)
         try:
             (rel_host, rel_port) = self.server.bind()
         except Exception:
@@ -113,9 +114,11 @@ class RayDataServer(object):
     def serve(self, func_for_row=None, func_for_rows=None):
         try:
             if func_for_row is not None:
-                data = (func_for_row(item) for item in RayContext.fetch_once_as_rows(self.java_server))
+                data = (func_for_row(item)
+                        for item in RayContext.fetch_once_as_rows(self.java_server))
             elif func_for_rows is not None:
-                data = func_for_rows(RayContext.fetch_once_as_rows(self.java_server))
+                data = func_for_rows(
+                    RayContext.fetch_once_as_rows(self.java_server))
             self.server.serve(data)
         except Exception as e:
             raise e
