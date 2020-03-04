@@ -62,7 +62,7 @@ class OnceServer(object):
         try:
             write_int(SpecialLengths.START_ARROW_STREAM, out)            
             out_data = ([df[name] for name in df] for df in
-                    PythonContext.build_chunk_result(data, 1024))                  
+                    PythonContext.build_chunk_result(data, 1024))                                    
             self.out_ser.dump_stream(out_data, out)
 
             write_int(SpecialLengths.END_OF_DATA_SECTION, out)

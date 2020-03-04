@@ -84,12 +84,12 @@ class PythonContext(object):
         for item in items:
             buffer.append(item)
             if len(buffer) == block_size:
-                df = pd.DataFrame(buffer)
+                df = pd.DataFrame(buffer,columns=buffer[0].keys())
                 buffer.clear()
                 yield df
 
         if len(buffer) > 0:
-            df = pd.DataFrame(buffer)
+            df = pd.DataFrame(buffer,columns=buffer[0].keys())
             buffer.clear()
             yield df
 

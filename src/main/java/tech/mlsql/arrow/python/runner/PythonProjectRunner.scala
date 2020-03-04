@@ -53,15 +53,19 @@ class PythonProjectRunner(projectDirectory: String,
     }.start()
 
     // redirect err to other place(e.g. send them to driver)
-    if (conf.getOrElse("throwErr", "true").toBoolean) {
-      val err = proc.stderr.lines.mkString("\n")
-      if (!err.isEmpty) {
-        proc.close()
-        throw new PythonErrException(err)
+    new Thread(s"stderr reader for $command") {
+      override def run(): Unit = {
+        if (conf.getOrElse("throwErr", "true").toBoolean) {
+          val err = proc.stderr.lines.mkString("\n")
+          if (!err.isEmpty) {
+            proc.close()
+            throw new PythonErrException(err)
+          }
+        } else {
+          Utils.redirectStream(conf, proc.stderr)
+        }
       }
-    } else {
-      Utils.redirectStream(conf, proc.stderr)
-    }
+    }.start()
 
 
     new Iterator[String] {
@@ -123,7 +127,7 @@ object PythonProjectRunner {
   val KEEP_LOCAL_DIR = "keepLocalDir"
 }
 
-class PythonErrException (message: String, cause: Throwable)
+class PythonErrException(message: String, cause: Throwable)
   extends Exception(message, cause) {
 
   def this(message: String) = this(message, null)
