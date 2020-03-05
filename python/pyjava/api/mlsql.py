@@ -260,6 +260,12 @@ class RayContext(object):
         for shard in self.data_servers():
             for row in RayContext.fetch_once_as_rows(shard):
                 yield row
+    
+    @staticmethod  
+    def collect_from(servers):
+        for shard in servers:
+            for row in RayContext.fetch_once_as_rows(shard):
+                yield row
 
     def to_pandas(self):
         items = [row for row in self.collect()]

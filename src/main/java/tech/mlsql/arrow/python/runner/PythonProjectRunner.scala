@@ -6,6 +6,7 @@ import java.util.concurrent.atomic.AtomicReference
 import os.SubProcess
 import tech.mlsql.arrow.Utils
 import tech.mlsql.common.utils.log.Logging
+import tech.mlsql.common.utils.shell.ShellCommand
 
 import scala.io.Source
 
@@ -28,6 +29,23 @@ class PythonProjectRunner(projectDirectory: String,
       cwd = os.Path(projectDirectory),
       env = env)
     innerProcess = Option(proc)
+    val (_, pythonPid) = try {
+      val f = proc.wrapped.getClass.getDeclaredField("pid")
+      f.setAccessible(true)
+      val parentPid = f.getLong(proc.wrapped)
+      val subPid = ShellCommand.execCmdV2("pgrep", "-P", parentPid).out.lines.mkString("")
+      (parentPid, subPid)
+    } catch {
+      case e: Exception =>
+        logWarning(
+          s"""
+             |${command.mkString(" ")} may not been killed since we can not get it's pid.
+             |Make sure you are runing on mac/linux and pgrep is installed.
+             |""".stripMargin)
+        (-1, -1)
+    }
+
+
     val lines = Source.fromInputStream(proc.stdout.wrapped)("utf-8").getLines
     val childThreadException = new AtomicReference[Throwable](null)
     // Start a thread to print the process's stderr to ours
@@ -58,8 +76,7 @@ class PythonProjectRunner(projectDirectory: String,
         if (conf.getOrElse("throwErr", "true").toBoolean) {
           val err = proc.stderr.lines.mkString("\n")
           if (!err.isEmpty) {
-            proc.close()
-            throw new PythonErrException(err)
+            childThreadException.set(new PythonErrException(err))
           }
         } else {
           Utils.redirectStream(conf, proc.stderr)
@@ -92,7 +109,11 @@ class PythonProjectRunner(projectDirectory: String,
           if (proc.exitCode() != 0) {
             val msg = s"Subprocess exited with status ${proc.exitCode()}. " +
               s"Command ran: " + command.mkString(" ")
-            throw new IllegalStateException(msg)
+            if(childThreadException.get()!=null){
+              throw childThreadException.get()
+            }else {
+              throw new IllegalStateException(msg)
+            }
           }
           false
         }
@@ -101,6 +122,7 @@ class PythonProjectRunner(projectDirectory: String,
       }
 
       private def cleanup(): Unit = {
+        ShellCommand.execCmdV2("kill", "-9", pythonPid + "")
         // cleanup task working directory if used
         scala.util.control.Exception.ignoring(classOf[IOException]) {
           if (conf.get(KEEP_LOCAL_DIR).map(_.toBoolean).getOrElse(false)) {

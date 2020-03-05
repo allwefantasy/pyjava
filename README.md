@@ -130,7 +130,7 @@ val abc = df.rdd.mapPartitions { iter =>
   val commonTaskContext = new SparkContextImp(TaskContext.get(), batch)
   val columnarBatchIter = batch.compute(Iterator(newIter), TaskContext.getPartitionId(), commonTaskContext)
   columnarBatchIter.flatMap { batch =>
-    batch.rowIterator.asScala
+    batch.rowIterator.asScala.map(_.copy)
   }
 }
 
