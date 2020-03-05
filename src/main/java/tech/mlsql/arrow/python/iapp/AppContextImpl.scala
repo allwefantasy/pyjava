@@ -158,12 +158,12 @@ class JavaContext {
     // Note that due to this scala bug: https://github.com/scala/bug/issues/11016, we need to make
     // this function polymorphic for every scala version >= 2.12, otherwise an overloaded method
     // resolution error occurs at compile time.
-    addTaskCompletionListener(new AppTaskCompletionListener {
+    _addTaskCompletionListener(new AppTaskCompletionListener {
       override def onTaskCompletion(context: JavaContext): Unit = f(context)
     })
   }
 
-  def addTaskCompletionListener(listener: AppTaskCompletionListener): JavaContext = {
+  def _addTaskCompletionListener(listener: AppTaskCompletionListener): JavaContext = {
     buffer += listener
     this
   }

@@ -7,6 +7,7 @@ import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector.ipc.ArrowStreamReader
 import org.apache.spark.TaskContext
 import org.apache.spark.sql.SparkUtils
+import org.apache.spark.util.TaskCompletionListener
 import tech.mlsql.arrow.context.CommonTaskContext
 import tech.mlsql.arrow.python.PythonWorkerFactory
 import tech.mlsql.arrow.python.runner.ArrowPythonRunner
@@ -21,18 +22,20 @@ class SparkContextImp(context: TaskContext, _arrowPythonRunner: ArrowPythonRunne
      reuseWorker: Boolean,
      worker: Socket
     ) => {
-      context.addTaskCompletionListener { _ =>
-        //writerThread.shutdownOnTaskCompletion()
-        callback()
-        if (!reuseWorker || releasedOrClosed.compareAndSet(false, true)) {
-          try {
-            worker.close()
-          } catch {
-            case e: Exception =>
-              logWarning("Failed to close worker socket", e)
+      context.addTaskCompletionListener(new TaskCompletionListener {
+        override def onTaskCompletion(context: TaskContext): Unit = {
+          //writerThread.shutdownOnTaskCompletion()
+          callback()
+          if (!reuseWorker || releasedOrClosed.compareAndSet(false, true)) {
+            try {
+              worker.close()
+            } catch {
+              case e: Exception =>
+                logWarning("Failed to close worker socket", e)
+            }
           }
         }
-      }
+      })
     }
   }
 
@@ -81,7 +84,11 @@ class SparkContextImp(context: TaskContext, _arrowPythonRunner: ArrowPythonRunne
 
   override def javaSideSocketServerRegister(): ServerSocket => Unit = {
     (server: ServerSocket) => {
-      context.addTaskCompletionListener(_ => server.close())
+      context.addTaskCompletionListener(new TaskCompletionListener {
+        override def onTaskCompletion(context: TaskContext): Unit = {
+          server.close()
+        }
+      })
     }
   }
 
@@ -111,12 +118,14 @@ class SparkContextImp(context: TaskContext, _arrowPythonRunner: ArrowPythonRunne
 
   override def readerRegister(callback: () => Unit): (ArrowStreamReader, BufferAllocator) => Unit = {
     (reader, allocator) => {
-      context.addTaskCompletionListener { _ =>
-        if (reader != null) {
-          reader.close(false)
+      context.addTaskCompletionListener(new TaskCompletionListener {
+        override def onTaskCompletion(context: TaskContext): Unit = {
+          if (reader != null) {
+            reader.close(false)
+          }
+          allocator.close()
         }
-        allocator.close()
-      }
+      })
     }
   }
 }

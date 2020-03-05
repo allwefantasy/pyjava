@@ -32,6 +32,7 @@ import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types.{StructType, _}
 import org.apache.spark.sql.vectorized.{ArrowColumnVector, ColumnVector, ColumnarBatch}
 import org.apache.spark.sql.{DataFrame, SQLContext, SparkUtils}
+import org.apache.spark.util.TaskCompletionListener
 import tech.mlsql.arrow.context.CommonTaskContext
 import tech.mlsql.arrow.python.iapp.{AppContextImpl, JavaContext}
 import tech.mlsql.arrow.python.ispark.SparkContextImp
@@ -94,11 +95,12 @@ object ArrowConverters {
         root.close()
         allocator.close()
       }
-      case c: SparkContextImp => c.innerContext.asInstanceOf[TaskContext].addTaskCompletionListener {
-        _ =>
+      case c: SparkContextImp => c.innerContext.asInstanceOf[TaskContext].addTaskCompletionListener(new TaskCompletionListener {
+        override def onTaskCompletion(context: TaskContext): Unit = {
           root.close()
           allocator.close()
-      }
+        }
+      })
     }
 
     new Iterator[Array[Byte]] {
@@ -155,11 +157,12 @@ object ArrowConverters {
           root.close()
           allocator.close()
         }
-        case c: SparkContextImp => c.innerContext.asInstanceOf[TaskContext].addTaskCompletionListener {
-          _ =>
+        case c: SparkContextImp => c.innerContext.asInstanceOf[TaskContext].addTaskCompletionListener(new TaskCompletionListener {
+          override def onTaskCompletion(context: TaskContext): Unit = {
             root.close()
             allocator.close()
-        }
+          }
+        })
       }
 
       override def hasNext: Boolean = rowIter.hasNext || {

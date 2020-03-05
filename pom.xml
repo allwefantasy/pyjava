@@ -6,7 +6,7 @@
 
     <groupId>tech.mlsql</groupId>
     <artifactId>pyjava-2.4_2.11</artifactId>
-    <version>0.2.8</version>
+    <version>0.2.8.0</version>
     <name>pyjava with arrow support</name>
     <url>https://github.com/allwefantasy/pyjava</url>
     <description>
@@ -52,7 +52,7 @@
         <httpclient.version>4.5.3</httpclient.version>
         <scope>provided</scope>
         <hadoop-client-version>2.6.5</hadoop-client-version>
-        <common-utils-version>0.2.4</common-utils-version>
+        <common-utils-version>0.2.5</common-utils-version>
         <serviceframework.version>2.0.3</serviceframework.version>
         <arrow.version>0.10.0</arrow.version>
     </properties>
@@ -152,19 +152,6 @@
         <dependency>
             <groupId>org.apache.spark</groupId>
             <artifactId>spark-graphx_${scala.binary.version}</artifactId>
-            <version>${spark.version}</version>
-            <scope>${scope}</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.spark</groupId>
-            <artifactId>spark-streaming-kafka-0-8_${scala.binary.version}</artifactId>
-            <version>${spark.version}</version>
-            <scope>${scope}</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.spark</groupId>
-            <artifactId>spark-sql-kafka-0-10_${scala.binary.version}</artifactId>
             <version>${spark.version}</version>
             <scope>${scope}</scope>
         </dependency>
