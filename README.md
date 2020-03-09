@@ -13,12 +13,127 @@ by default.
 > The initial code in this lib is from Apache Spark.
 
 
-Before you can run PyJava in Java/Scala side, please do the following command 
-in the target python env.
+## Install
 
-```sql
+Setup python(>= 3.6) Env(Conda is recommended):
+
+```shell
 pip uninstall pyjava && pip install pyjava
 ```
+
+Setup Java env(Maven is recommended):
+
+```xml
+<dependency>
+    <groupId>tech.mlsql</groupId>
+    <artifactId>pyjava-2.4_2.12</artifactId>
+    <version>0.2.8.0</version>
+</dependency>
+```
+
+
+## Using python code snippet to process data in Java/Scala
+
+With pyjava, you can run any python code in your Java/Scala application.
+
+```scala
+
+val envs = new util.HashMap[String, String]()
+// prepare python environment
+envs.put(str(PythonConf.PYTHON_ENV), "source activate dev && export ARROW_PRE_0_15_IPC_FORMAT=1 ")
+
+// describe the data which will be transfered to python 
+val sourceSchema = StructType(Seq(StructField("value", StringType)))
+
+val batch = new ArrowPythonRunner(
+  Seq(ChainedPythonFunctions(Seq(PythonFunction(
+    """
+      |import pandas as pd
+      |import numpy as np
+      |
+      |def process():
+      |    for item in context.fetch_once_as_rows():
+      |        item["value1"] = item["value"] + "_suffix"
+      |        yield item
+      |
+      |context.build_result(process())
+    """.stripMargin, envs, "python", "3.6")))), sourceSchema,
+  "GMT", Map()
+)
+
+// prepare data
+val sourceEnconder = RowEncoder.apply(sourceSchema).resolveAndBind()
+val newIter = Seq(Row.fromSeq(Seq("a1")), Row.fromSeq(Seq("a2"))).map { irow =>
+sourceEnconder.toRow(irow).copy()
+}.iterator
+
+// run the code and get the return result
+val javaConext = new JavaContext
+val commonTaskContext = new AppContextImpl(javaConext, batch)
+val columnarBatchIter = batch.compute(Iterator(newIter), TaskContext.getPartitionId(), commonTaskContext)
+
+//f.copy(), copy function is required 
+columnarBatchIter.flatMap { batch =>
+  batch.rowIterator.asScala
+}.foreach(f => println(f.copy()))
+javaConext.markComplete
+javaConext.close
+```
+
+## Using python code snippet to process data in Spark
+
+```scala
+val session = spark
+import session.implicits._
+val timezoneid = session.sessionState.conf.sessionLocalTimeZone
+val df = session.createDataset[String](Seq("a1", "b1")).toDF("value")
+val struct = df.schema
+val abc = df.rdd.mapPartitions { iter =>
+  val enconder = RowEncoder.apply(struct).resolveAndBind()
+  val envs = new util.HashMap[String, String]()
+  envs.put(str(PythonConf.PYTHON_ENV), "source activate streamingpro-spark-2.4.x")
+  val batch = new ArrowPythonRunner(
+    Seq(ChainedPythonFunctions(Seq(PythonFunction(
+      """
+        |import pandas as pd
+        |import numpy as np
+        |for item in data_manager.fetch_once():
+        |    print(item)
+        |df = pd.DataFrame({'AAA': [4, 5, 6, 7],'BBB': [10, 20, 30, 40],'CCC': [100, 50, -30, -50]})
+        |data_manager.set_output([[df['AAA'],df['BBB']]])
+      """.stripMargin, envs, "python", "3.6")))), struct,
+    timezoneid, Map()
+  )
+  val newIter = iter.map { irow =>
+    enconder.toRow(irow)
+  }
+  val commonTaskContext = new SparkContextImp(TaskContext.get(), batch)
+  val columnarBatchIter = batch.compute(Iterator(newIter), TaskContext.getPartitionId(), commonTaskContext)
+  columnarBatchIter.flatMap { batch =>
+    batch.rowIterator.asScala.map(_.copy)
+  }
+}
+
+val wow = SparkUtils.internalCreateDataFrame(session, abc, StructType(Seq(StructField("AAA", LongType), StructField("BBB", LongType))), false)
+wow.show()
+```
+
+## Run Python Project
+
+With Pyjava, you can tell the system where is the python project and which is then entrypoint,
+then you can run this project in Java/Scala.
+
+```scala
+import tech.mlsql.arrow.python.runner.PythonProjectRunner
+
+val runner = new PythonProjectRunner("./pyjava/examples/pyproject1", Map())
+val output = runner.run(Seq("bash", "-c", "source activate dev && python train.py"), Map(
+  "tempDataLocalPath" -> "/tmp/data",
+  "tempModelLocalPath" -> "/tmp/model"
+))
+output.foreach(println)
+```
+
 
 ## Example In MLSQL
 
@@ -67,93 +182,9 @@ data_manager.set_output([[df['AAA'],df['BBB']]])
 !python close;
 ```
 
-## Example In Normal Java/Scala Application
-
-```scala
-val envs = new util.HashMap[String, String]()
-envs.put(str(PythonConf.PYTHON_ENV), "source activate streamingpro-spark-2.4.x")
-
-val dataSchema = StructType(Seq(StructField("value", StringType)))
-val enconder = RowEncoder.apply(dataSchema).resolveAndBind()
-val batch = new ArrowPythonRunner(
-  Seq(ChainedPythonFunctions(Seq(PythonFunction(
-    """
-      |import pandas as pd
-      |import numpy as np
-      |for item in data_manager.fetch_once():
-      |    print(item)
-      |df = pd.DataFrame({'AAA': [4, 5, 6, 7],'BBB': [10, 20, 30, 40],'CCC': [100, 50, -30, -50]})
-      |data_manager.set_output([[df['AAA'],df['BBB']]])
-    """.stripMargin, envs, "python", "3.6")))), dataSchema,
-  "GMT", Map()
-)
-val newIter = Seq(Row.fromSeq(Seq("a1")), Row.fromSeq(Seq("a2"))).map { irow =>
-  enconder.toRow(irow)
-}.iterator
-val javaConext = new JavaContext
-val commonTaskContext = new AppContextImpl(javaConext, batch)
-val columnarBatchIter = batch.compute(Iterator(newIter), TaskContext.getPartitionId(), commonTaskContext)
-columnarBatchIter.flatMap { batch =>
-  batch.rowIterator.asScala
-}.foreach(f => println(f.copy()))
-javaConext.markComplete
-javaConext.close
-```
-
-## Example In Spark
-
-```scala
-val session = spark
-import session.implicits._
-val timezoneid = session.sessionState.conf.sessionLocalTimeZone
-val df = session.createDataset[String](Seq("a1", "b1")).toDF("value")
-val struct = df.schema
-val abc = df.rdd.mapPartitions { iter =>
-  val enconder = RowEncoder.apply(struct).resolveAndBind()
-  val envs = new util.HashMap[String, String]()
-  envs.put(str(PythonConf.PYTHON_ENV), "source activate streamingpro-spark-2.4.x")
-  val batch = new ArrowPythonRunner(
-    Seq(ChainedPythonFunctions(Seq(PythonFunction(
-      """
-        |import pandas as pd
-        |import numpy as np
-        |for item in data_manager.fetch_once():
-        |    print(item)
-        |df = pd.DataFrame({'AAA': [4, 5, 6, 7],'BBB': [10, 20, 30, 40],'CCC': [100, 50, -30, -50]})
-        |data_manager.set_output([[df['AAA'],df['BBB']]])
-      """.stripMargin, envs, "python", "3.6")))), struct,
-    timezoneid, Map()
-  )
-  val newIter = iter.map { irow =>
-    enconder.toRow(irow)
-  }
-  val commonTaskContext = new SparkContextImp(TaskContext.get(), batch)
-  val columnarBatchIter = batch.compute(Iterator(newIter), TaskContext.getPartitionId(), commonTaskContext)
-  columnarBatchIter.flatMap { batch =>
-    batch.rowIterator.asScala.map(_.copy)
-  }
-}
-
-val wow = SparkUtils.internalCreateDataFrame(session, abc, StructType(Seq(StructField("AAA", LongType), StructField("BBB", LongType))), false)
-wow.show()
-```
-
-## Run Python Project
 
 
-
-```scala
-import tech.mlsql.arrow.python.runner.PythonProjectRunner
-
-val runner = new PythonProjectRunner("./pyjava/examples/pyproject1", Map())
-val output = runner.run(Seq("bash", "-c", "source activate streamingpro-spark-2.4.x && python train.py"), Map(
-  "tempDataLocalPath" -> "/tmp/data",
-  "tempModelLocalPath" -> "/tmp/model"
-))
-output.foreach(println)
-```
-
-## Arrow Server/Client
+## Using PyJava as Arrow Server/Client
 
 Java Server side:
 
