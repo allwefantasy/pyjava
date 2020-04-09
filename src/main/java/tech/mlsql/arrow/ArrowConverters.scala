@@ -65,9 +65,7 @@ class ArrowBatchStreamWriter(
    * End the Arrow stream, does not close output stream.
    */
   def end(): Unit = {
-    val opt = new IpcOption()
-    opt.write_legacy_ipc_format = true
-    ArrowStreamWriter.writeEndOfStream(writeChannel, opt)
+    ArrowStreamWriter.writeEndOfStream(writeChannel)
   }
 }
 
