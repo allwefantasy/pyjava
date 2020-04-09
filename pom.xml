@@ -42,18 +42,18 @@
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
-        <scala.version>2.11.8</scala.version>
-        <scala.binary.version>2.11</scala.binary.version>
-        <spark.version>2.4.3</spark.version>
-        <spark.bigversion>2.4</spark.bigversion>
-        <arrow.version>0.10.0</arrow.version>
+<!--        <scala.version>2.11.8</scala.version>-->
+<!--        <scala.binary.version>2.11</scala.binary.version>-->
+<!--        <spark.version>2.4.3</spark.version>-->
+<!--        <spark.bigversion>2.4</spark.bigversion>-->
+<!--        <arrow.version>0.10.0</arrow.version>-->
 
-<!--        <scala.version>2.12.8</scala.version>-->
-<!--        <scala.binary.version>2.12</scala.binary.version>-->
-<!--        <scala.jline.version>2.12.1</scala.jline.version>-->
-<!--        <spark.version>3.0.0-preview2</spark.version>-->
-<!--        <spark.bigversion>3.0</spark.bigversion>-->
-<!--        <arrow.version>0.15.1</arrow.version>-->
+        <scala.version>2.12.8</scala.version>
+        <scala.binary.version>2.12</scala.binary.version>
+        <scala.jline.version>2.12.1</scala.jline.version>
+        <spark.version>3.0.0-preview2</spark.version>
+        <spark.bigversion>3.0</spark.bigversion>
+        <arrow.version>0.15.1</arrow.version>
 
         <guava.version>16.0</guava.version>
         <httpclient.version>4.5.3</httpclient.version>
