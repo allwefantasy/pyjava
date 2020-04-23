@@ -31,7 +31,7 @@ class LogClient(object):
             self.log_port = self.conf['spark.mlsql.log.driver.port']
             self.log_user = self.conf['PY_EXECUTE_USER']
             self.log_token = self.conf['spark.mlsql.log.driver.token']
-            self.log_group_id = self.conf['groupId']        
+            self.log_group_id = self.conf['groupId']
             import socket
             self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.conn.connect((self.log_host, int(self.log_port)))
@@ -54,8 +54,8 @@ class LogClient(object):
             }}, ensure_ascii=False)
         write_bytes_with_length(resp, self.outfile)
 
-    def close(self):        
-        if hasattr(self,"conn"):
+    def close(self):
+        if hasattr(self, "conn"):
             self.conn.close()
             self.conn = None
 
@@ -72,7 +72,6 @@ class PythonContext(object):
         self.log_client = LogClient(self.conf)
         if "pythonMode" in conf and conf["pythonMode"] == "ray":
             self.rayContext = RayContext(self)
-        
 
     def set_output(self, value, schema=""):
         self.output_data = value
@@ -84,12 +83,12 @@ class PythonContext(object):
         for item in items:
             buffer.append(item)
             if len(buffer) == block_size:
-                df = pd.DataFrame(buffer,columns=buffer[0].keys())
+                df = pd.DataFrame(buffer, columns=buffer[0].keys())
                 buffer.clear()
                 yield df
 
         if len(buffer) > 0:
-            df = pd.DataFrame(buffer,columns=buffer[0].keys())
+            df = pd.DataFrame(buffer, columns=buffer[0].keys())
             buffer.clear()
             yield df
 
@@ -127,14 +126,14 @@ class PythonContext(object):
         self.have_fetched = True
         for items in self.input_data:
             yield pa.Table.from_batches([items]).to_pandas()
-
+         
 
 class PythonProjectContext(object):
     def __init__(self):
         self.params_read = False
         self.conf = {}
         self.read_params_once()
-        self.log_client = LogClient(self.conf)        
+        self.log_client = LogClient(self.conf)
 
     def read_params_once(self):
         if not self.params_read:
@@ -217,9 +216,10 @@ class RayContext(object):
         else:
             raise Exception("context is not set")
 
-        import ray
-        ray.shutdown(exiting_interpreter=False)
-        ray.init(redis_address=url)
+        if url is not None:
+            import ray
+            ray.shutdown(exiting_interpreter=False)
+            ray.init(redis_address=url)
         return context.rayContext
 
     def setup(self, func_for_row, func_for_rows=None):
@@ -246,8 +246,8 @@ class RayContext(object):
             server = ray.experimental.get_actor(server_info.server_id)
             buffer.append(ray.get(server.connect_info.remote()))
             server.serve.remote(func_for_row, func_for_rows)
-        items =  [vars(server) for server in buffer]
-        self.python_context.build_result(items, 1024)           
+        items = [vars(server) for server in buffer]
+        self.python_context.build_result(items, 1024)
         return buffer
 
     def foreach(self, func_for_row):
@@ -260,8 +260,8 @@ class RayContext(object):
         for shard in self.data_servers():
             for row in RayContext.fetch_once_as_rows(shard):
                 yield row
-    
-    @staticmethod  
+
+    @staticmethod
     def collect_from(servers):
         for shard in servers:
             for row in RayContext.fetch_once_as_rows(shard):
