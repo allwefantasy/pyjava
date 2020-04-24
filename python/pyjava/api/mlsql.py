@@ -64,6 +64,8 @@ class PythonContext(object):
     cache = {}
 
     def __init__(self, iterator, conf):
+        self.context_id = str(uuid.uuid4())
+        self.data_mmap_file_ref = None
         self.input_data = iterator
         self.output_data = [[]]
         self.conf = conf
@@ -100,7 +102,19 @@ class PythonContext(object):
         return self.output_data
 
     def __del__(self):
-        self.log_client.close()
+        print("==clean== context")
+        if self.log_client is not None:
+            try:
+                self.log_client.close()
+            except Exception as e:
+                pass
+
+        if self.data_mmap_file_ref is not None:
+            try:
+                self.data_mmap_file_ref.close()
+                os.remove(self.context_id + ".dat")
+            except Exception as e:
+                pass
 
     def noops_fetch(self):
         for item in self.fetch_once():
@@ -126,7 +140,7 @@ class PythonContext(object):
         self.have_fetched = True
         for items in self.input_data:
             yield pa.Table.from_batches([items]).to_pandas()
-         
+
 
 class PythonProjectContext(object):
     def __init__(self):
@@ -260,6 +274,44 @@ class RayContext(object):
         for shard in self.data_servers():
             for row in RayContext.fetch_once_as_rows(shard):
                 yield row
+
+    def fetch_as_file(self, batch_size):
+        import pyarrow as pa
+        data_servers = self.data_servers()
+        python_context = self.python_context
+
+        def inner_fetch():
+            for data_server in data_servers:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                    out_ser = ArrowStreamSerializer()
+                    sock.connect((data_server.host, data_server.port))
+                    buffer_size = int(os.environ.get("BUFFER_SIZE", 65536))
+                    infile = os.fdopen(os.dup(sock.fileno()), "rb", buffer_size)
+                    result = out_ser.load_stream(infile)
+                    for batch in result:
+                        yield batch
+
+        def gen_by_batch():
+            import numpy as np
+            import math
+            python_context.data_mmap_file_ref = pa.memory_map(python_context.context_id + ".dat")
+            reader = pa.ipc.open_file(python_context.data_mmap_file_ref)
+            num_record_batches = reader.num_record_batches
+            for i in range(num_record_batches):
+                df = reader.get_batch(i).to_pandas()
+                for small_batch in np.array_split(df, math.floor(df.shape[0] / batch_size)):
+                    yield small_batch
+
+        if python_context.data_mmap_file_ref is not None:
+            return gen_by_batch()
+        else:
+            writer = None
+            for batch in inner_fetch():
+                if writer is None:
+                    writer = pa.RecordBatchFileWriter(python_context.context_id + ".dat", batch.schema)
+                writer.write_batch(batch)
+            writer.close()
+            return gen_by_batch()
 
     @staticmethod
     def collect_from(servers):

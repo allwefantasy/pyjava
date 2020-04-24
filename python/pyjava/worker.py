@@ -127,6 +127,7 @@ def main(infile, outfile):
             finally:
                 if hasattr(out_iter, 'close'):
                     out_iter.close()
+            del data_manager
 
         process()
 
