@@ -294,7 +294,8 @@ class RayContext(object):
         def gen_by_batch():
             import numpy as np
             import math
-            python_context.data_mmap_file_ref = pa.memory_map(python_context.context_id + ".dat")
+            if python_context.data_mmap_file_ref is None:
+                python_context.data_mmap_file_ref = pa.memory_map(python_context.context_id + ".dat")
             reader = pa.ipc.open_file(python_context.data_mmap_file_ref)
             num_record_batches = reader.num_record_batches
             for i in range(num_record_batches):
