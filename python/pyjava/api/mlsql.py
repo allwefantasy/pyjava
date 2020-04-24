@@ -63,9 +63,9 @@ class LogClient(object):
 class PythonContext(object):
     cache = {}
 
-    def __init__(self, iterator, conf):
-        self.context_id = str(uuid.uuid4())
-        self.data_mmap_file_ref = None
+    def __init__(self, context_id, iterator, conf):
+        self.context_id = context_id
+        self.data_mmap_file_ref = {}
         self.input_data = iterator
         self.output_data = [[]]
         self.conf = conf
@@ -109,10 +109,9 @@ class PythonContext(object):
             except Exception as e:
                 pass
 
-        if self.data_mmap_file_ref is not None:
+        if 'data_mmap_file_ref' in self.data_mmap_file_ref:
             try:
-                self.data_mmap_file_ref.close()
-                os.remove(self.context_id + ".dat")
+                self.data_mmap_file_ref['data_mmap_file_ref'].close()
             except Exception as e:
                 pass
 
@@ -275,10 +274,9 @@ class RayContext(object):
             for row in RayContext.fetch_once_as_rows(shard):
                 yield row
 
-    def fetch_as_file(self, batch_size):
+    @staticmethod
+    def fetch_as_file(context_id, data_servers, file_ref, batch_size):
         import pyarrow as pa
-        data_servers = self.data_servers()
-        python_context = self.python_context
 
         def inner_fetch():
             for data_server in data_servers:
@@ -294,25 +292,31 @@ class RayContext(object):
         def gen_by_batch():
             import numpy as np
             import math
-            if python_context.data_mmap_file_ref is None:
-                python_context.data_mmap_file_ref = pa.memory_map(python_context.context_id + ".dat")
-            reader = pa.ipc.open_file(python_context.data_mmap_file_ref)
+            if 'data_mmap_file_ref' not in file_ref:
+                file_ref['data_mmap_file_ref'] = pa.memory_map(context_id + "/__input__.dat")
+            reader = pa.ipc.open_file(file_ref['data_mmap_file_ref'])
             num_record_batches = reader.num_record_batches
             for i in range(num_record_batches):
                 df = reader.get_batch(i).to_pandas()
                 for small_batch in np.array_split(df, math.floor(df.shape[0] / batch_size)):
                     yield small_batch
 
-        if python_context.data_mmap_file_ref is not None:
+        if 'data_mmap_file_ref' in file_ref:
             return gen_by_batch()
         else:
             writer = None
             for batch in inner_fetch():
                 if writer is None:
-                    writer = pa.RecordBatchFileWriter(python_context.context_id + ".dat", batch.schema)
+                    writer = pa.RecordBatchFileWriter(context_id + "/__input__.dat", batch.schema)
                 writer.write_batch(batch)
             writer.close()
             return gen_by_batch()
+
+    def collect_as_file(self, batch_size):
+        data_servers = self.data_servers()
+        python_context = self.python_context
+        return RayContext.fetch_as_file(python_context.context_id, data_servers, python_context.data_mmap_file_ref,
+                                        batch_size)
 
     @staticmethod
     def collect_from(servers):
