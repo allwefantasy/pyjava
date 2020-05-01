@@ -125,6 +125,7 @@ class SparkContextImp(context: TaskContext, _arrowPythonRunner: ArrowPythonRunne
           }
           // 这里有个特殊情况，用户可能只会读取部分数据，这个时候进行close，会
           // 显示内存泄露，此时进行close会抛错，我们需要catch住这个错误。
+          // 目前来看，资源应该能够得到释放。大部分情况，我们都能正常消费掉所有数据。
           try {
             allocator.close()
           } catch {
