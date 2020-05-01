@@ -14,8 +14,8 @@ import tech.mlsql.arrow.python.runner.ArrowPythonRunner
 import tech.mlsql.common.utils.log.Logging
 
 /**
-  * 2019-08-15 WilliamZhu(allwefantasy@gmail.com)
-  */
+ * 2019-08-15 WilliamZhu(allwefantasy@gmail.com)
+ */
 class SparkContextImp(context: TaskContext, _arrowPythonRunner: ArrowPythonRunner) extends CommonTaskContext with Logging {
   override def pythonWorkerRegister(callback: () => Unit) = {
     (releasedOrClosed: AtomicBoolean,
@@ -123,7 +123,15 @@ class SparkContextImp(context: TaskContext, _arrowPythonRunner: ArrowPythonRunne
           if (reader != null) {
             reader.close(false)
           }
-          allocator.close()
+          // 这里有个特殊情况，用户可能只会读取部分数据，这个时候进行close，会
+          // 显示内存泄露，此时进行close会抛错，我们需要catch住这个错误。
+          try {
+            allocator.close()
+          } catch {
+            case e: Exception =>
+              logError("allocator.close()", e)
+          }
+
         }
       })
     }

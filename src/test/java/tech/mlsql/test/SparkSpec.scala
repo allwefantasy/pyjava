@@ -27,7 +27,7 @@ class SparkSpec extends StreamTest {
     val abc = df.rdd.mapPartitions { iter =>
       val enconder = RowEncoder.apply(struct).resolveAndBind()
       val envs = new util.HashMap[String, String]()
-      envs.put(str(PythonConf.PYTHON_ENV), "source activate streamingpro-spark-2.4.x")
+      envs.put(str(PythonConf.PYTHON_ENV), "source activate dev && export ARROW_PRE_0_15_IPC_FORMAT=1")
       val batch = new ArrowPythonRunner(
         Seq(ChainedPythonFunctions(Seq(PythonFunction(
           """
@@ -47,7 +47,7 @@ class SparkSpec extends StreamTest {
       val columnarBatchIter = batch.compute(Iterator(newIter), TaskContext.getPartitionId(), commonTaskContext)
       columnarBatchIter.flatMap { batch =>
         batch.rowIterator.asScala
-      }
+      }.map(f=>f.copy())
     }
 
     val wow = SparkUtils.internalCreateDataFrame(session, abc, StructType(Seq(StructField("AAA", LongType), StructField("BBB", LongType))), false)
