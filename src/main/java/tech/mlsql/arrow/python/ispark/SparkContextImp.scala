@@ -14,8 +14,8 @@ import tech.mlsql.arrow.python.runner.ArrowPythonRunner
 import tech.mlsql.common.utils.log.Logging
 
 /**
-  * 2019-08-15 WilliamZhu(allwefantasy@gmail.com)
-  */
+ * 2019-08-15 WilliamZhu(allwefantasy@gmail.com)
+ */
 class SparkContextImp(context: TaskContext, _arrowPythonRunner: ArrowPythonRunner) extends CommonTaskContext with Logging {
   override def pythonWorkerRegister(callback: () => Unit) = {
     (releasedOrClosed: AtomicBoolean,
@@ -123,7 +123,13 @@ class SparkContextImp(context: TaskContext, _arrowPythonRunner: ArrowPythonRunne
           if (reader != null) {
             reader.close(false)
           }
-          allocator.close()
+          try {
+            allocator.close()
+          } catch {
+            case e: Exception =>
+              logError("allocator.close()", e)
+          }
+
         }
       })
     }
