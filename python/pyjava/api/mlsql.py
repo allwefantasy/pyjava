@@ -31,7 +31,7 @@ class LogClient(object):
             self.log_port = self.conf['spark.mlsql.log.driver.port']
             self.log_user = self.conf['PY_EXECUTE_USER']
             self.log_token = self.conf['spark.mlsql.log.driver.token']
-            self.log_group_id = self.conf['groupId']        
+            self.log_group_id = self.conf['groupId']
             import socket
             self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.conn.connect((self.log_host, int(self.log_port)))
@@ -54,8 +54,8 @@ class LogClient(object):
             }}, ensure_ascii=False)
         write_bytes_with_length(resp, self.outfile)
 
-    def close(self):        
-        if hasattr(self,"conn"):
+    def close(self):
+        if hasattr(self, "conn"):
             self.conn.close()
             self.conn = None
 
@@ -63,7 +63,9 @@ class LogClient(object):
 class PythonContext(object):
     cache = {}
 
-    def __init__(self, iterator, conf):
+    def __init__(self, context_id, iterator, conf):
+        self.context_id = context_id
+        self.data_mmap_file_ref = {}
         self.input_data = iterator
         self.output_data = [[]]
         self.conf = conf
@@ -72,7 +74,6 @@ class PythonContext(object):
         self.log_client = LogClient(self.conf)
         if "pythonMode" in conf and conf["pythonMode"] == "ray":
             self.rayContext = RayContext(self)
-        
 
     def set_output(self, value, schema=""):
         self.output_data = value
@@ -84,12 +85,12 @@ class PythonContext(object):
         for item in items:
             buffer.append(item)
             if len(buffer) == block_size:
-                df = pd.DataFrame(buffer,columns=buffer[0].keys())
+                df = pd.DataFrame(buffer, columns=buffer[0].keys())
                 buffer.clear()
                 yield df
 
         if len(buffer) > 0:
-            df = pd.DataFrame(buffer,columns=buffer[0].keys())
+            df = pd.DataFrame(buffer, columns=buffer[0].keys())
             buffer.clear()
             yield df
 
@@ -101,7 +102,18 @@ class PythonContext(object):
         return self.output_data
 
     def __del__(self):
-        self.log_client.close()
+        print("==clean== context")
+        if self.log_client is not None:
+            try:
+                self.log_client.close()
+            except Exception as e:
+                pass
+
+        if 'data_mmap_file_ref' in self.data_mmap_file_ref:
+            try:
+                self.data_mmap_file_ref['data_mmap_file_ref'].close()
+            except Exception as e:
+                pass
 
     def noops_fetch(self):
         for item in self.fetch_once():
@@ -134,7 +146,7 @@ class PythonProjectContext(object):
         self.params_read = False
         self.conf = {}
         self.read_params_once()
-        self.log_client = LogClient(self.conf)        
+        self.log_client = LogClient(self.conf)
 
     def read_params_once(self):
         if not self.params_read:
@@ -217,9 +229,10 @@ class RayContext(object):
         else:
             raise Exception("context is not set")
 
-        import ray
-        ray.shutdown(exiting_interpreter=False)
-        ray.init(redis_address=url)
+        if url is not None:
+            import ray
+            ray.shutdown(exiting_interpreter=False)
+            ray.init(redis_address=url)
         return context.rayContext
 
     def setup(self, func_for_row, func_for_rows=None):
@@ -246,8 +259,8 @@ class RayContext(object):
             server = ray.experimental.get_actor(server_info.server_id)
             buffer.append(ray.get(server.connect_info.remote()))
             server.serve.remote(func_for_row, func_for_rows)
-        items =  [vars(server) for server in buffer]
-        self.python_context.build_result(items, 1024)           
+        items = [vars(server) for server in buffer]
+        self.python_context.build_result(items, 1024)
         return buffer
 
     def foreach(self, func_for_row):
@@ -260,8 +273,52 @@ class RayContext(object):
         for shard in self.data_servers():
             for row in RayContext.fetch_once_as_rows(shard):
                 yield row
-    
-    @staticmethod  
+
+    @staticmethod
+    def fetch_as_file(context_id, data_servers, file_ref, batch_size):
+        import pyarrow as pa
+
+        def inner_fetch():
+            for data_server in data_servers:
+                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+                    out_ser = ArrowStreamSerializer()
+                    sock.connect((data_server.host, data_server.port))
+                    buffer_size = int(os.environ.get("BUFFER_SIZE", 65536))
+                    infile = os.fdopen(os.dup(sock.fileno()), "rb", buffer_size)
+                    result = out_ser.load_stream(infile)
+                    for batch in result:
+                        yield batch
+
+        def gen_by_batch():
+            import numpy as np
+            import math
+            if 'data_mmap_file_ref' not in file_ref:
+                file_ref['data_mmap_file_ref'] = pa.memory_map(context_id + "/__input__.dat")
+            reader = pa.ipc.open_file(file_ref['data_mmap_file_ref'])
+            num_record_batches = reader.num_record_batches
+            for i in range(num_record_batches):
+                df = reader.get_batch(i).to_pandas()
+                for small_batch in np.array_split(df, math.floor(df.shape[0] / batch_size)):
+                    yield small_batch
+
+        if 'data_mmap_file_ref' in file_ref:
+            return gen_by_batch()
+        else:
+            writer = None
+            for batch in inner_fetch():
+                if writer is None:
+                    writer = pa.RecordBatchFileWriter(context_id + "/__input__.dat", batch.schema)
+                writer.write_batch(batch)
+            writer.close()
+            return gen_by_batch()
+
+    def collect_as_file(self, batch_size):
+        data_servers = self.data_servers()
+        python_context = self.python_context
+        return RayContext.fetch_as_file(python_context.context_id, data_servers, python_context.data_mmap_file_ref,
+                                        batch_size)
+
+    @staticmethod
     def collect_from(servers):
         for shard in servers:
             for row in RayContext.fetch_once_as_rows(shard):

@@ -17,10 +17,9 @@
 
 from __future__ import print_function
 
-
 from pyjava.api.mlsql import PythonContext
-from pyjava.utils import *
 from pyjava.cache.code_cache import CodeCache
+from pyjava.utils import *
 
 # 'resource' is a Unix specific module.
 has_resource_module = True
@@ -83,7 +82,7 @@ def main(infile, outfile):
 
             except (resource.error, OSError, ValueError) as e:
                 # not all systems support resource limits, so warn instead of failing
-                print("WARN: Failed to set memory limit: {0}\n".format(e), file=sys.stderr)        
+                print("WARN: Failed to set memory limit: {0}\n".format(e), file=sys.stderr)
         split_index = read_int(infile)
         print("split_index:%s" % split_index)
         if split_index == -1:  # for unit tests
@@ -105,30 +104,51 @@ def main(infile, outfile):
 
         out_ser = ArrowStreamPandasSerializer(timezone, True, True)
         is_interactive = os.environ.get('PY_INTERACTIVE', "no") == "yes"
+        import uuid
+        context_id = str(uuid.uuid4())
+
+        if not os.path.exists(context_id):
+            os.mkdir(context_id)
 
         def process():
-            input_data = ser.load_stream(infile)
-            code = CodeCache.get(command)
-            if is_interactive:
-                global data_manager
-                global context
-                data_manager = PythonContext(input_data, conf)
-                context = data_manager
-                global globals_namespace
-                exec(code, globals_namespace, globals_namespace)
-            else:
-                data_manager = PythonContext(input_data, conf)
-                n_local = {"data_manager": data_manager, "context": data_manager}
-                exec(code, n_local, n_local)
-            out_iter = data_manager.output()
             try:
+                input_data = ser.load_stream(infile)
+                code = CodeCache.get(command)
+                if is_interactive:
+                    global data_manager
+                    global context
+                    data_manager = PythonContext(context_id, input_data, conf)
+                    context = data_manager
+                    global globals_namespace
+                    exec(code, globals_namespace, globals_namespace)
+                else:
+                    data_manager = PythonContext(context_id, input_data, conf)
+                    n_local = {"data_manager": data_manager, "context": data_manager}
+                    exec(code, n_local, n_local)
+                out_iter = data_manager.output()
                 write_int(SpecialLengths.START_ARROW_STREAM, outfile)
                 out_ser.dump_stream(out_iter, outfile)
             finally:
-                if hasattr(out_iter, 'close'):
-                    out_iter.close()
+
+                try:
+                    import shutil
+                    shutil.rmtree(context_id)
+                except:
+                    pass
+
+                try:
+                    if hasattr(out_iter, 'close'):
+                        out_iter.close()
+                except:
+                    pass
+
+                try:
+                    del data_manager
+                except:
+                    pass
 
         process()
+
 
     except Exception:
         try:

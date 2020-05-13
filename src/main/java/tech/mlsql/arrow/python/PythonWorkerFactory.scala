@@ -1,13 +1,14 @@
 package tech.mlsql.arrow.python
 
 /**
-  * 2019-08-14 WilliamZhu(allwefantasy@gmail.com)
-  */
+ * 2019-08-14 WilliamZhu(allwefantasy@gmail.com)
+ */
 
 import java.io._
 import java.net.{InetAddress, ServerSocket, Socket, SocketException}
 import java.util.Arrays
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicLong
 
 import javax.annotation.concurrent.GuardedBy
 import tech.mlsql.arrow.Utils
@@ -46,6 +47,7 @@ class PythonWorkerFactory(pythonExec: String, envVars: Map[String, String], conf
   // This configuration indicates the module to run each Python worker.
   private val workerModule = conf.getOrElse(PYTHON_WORKER_MODULE, "pyjava.worker")
 
+  private val workerIdleTime = conf.getOrElse(PYTHON_WORKER_IDLE_TIME, "1").toInt
 
   @GuardedBy("self")
   private var daemon: Process = null
@@ -58,7 +60,11 @@ class PythonWorkerFactory(pythonExec: String, envVars: Map[String, String], conf
   private val idleWorkers = new mutable.Queue[Socket]()
   @GuardedBy("self")
   private var lastActivityNs = 0L
-  new MonitorThread().start()
+
+
+  val monitorThread = new MonitorThread()
+  monitorThread.setWorkerIdleTime(workerIdleTime)
+  monitorThread.start()
 
   @GuardedBy("self")
   private val simpleWorkers = new mutable.WeakHashMap[Socket, Process]()
@@ -82,10 +88,10 @@ class PythonWorkerFactory(pythonExec: String, envVars: Map[String, String], conf
   }
 
   /**
-    * Connect to a worker launched through pyspark/daemon.py (by default), which forks python
-    * processes itself to avoid the high cost of forking from Java. This currently only works
-    * on UNIX-based systems.
-    */
+   * Connect to a worker launched through pyspark/daemon.py (by default), which forks python
+   * processes itself to avoid the high cost of forking from Java. This currently only works
+   * on UNIX-based systems.
+   */
   private def createThroughDaemon(): Socket = {
 
     def createSocket(): Socket = {
@@ -117,8 +123,8 @@ class PythonWorkerFactory(pythonExec: String, envVars: Map[String, String], conf
   }
 
   /**
-    * Launch a worker by executing worker.py (by default) directly and telling it to connect to us.
-    */
+   * Launch a worker by executing worker.py (by default) directly and telling it to connect to us.
+   */
   private def createSimpleWorker(): Socket = {
     var serverSocket: ServerSocket = null
     try {
@@ -243,16 +249,22 @@ class PythonWorkerFactory(pythonExec: String, envVars: Map[String, String], conf
 
 
   /**
-    * Monitor all the idle workers, kill them after timeout.
-    */
+   * Monitor all the idle workers, kill them after timeout.
+   */
   private class MonitorThread extends Thread(s"Idle Worker Monitor for $pythonExec") {
+    //minutes
+    val IDLE_WORKER_TIMEOUT_NS_REF = new AtomicLong(TimeUnit.MINUTES.toNanos(1))
+
+    def setWorkerIdleTime(minutes: Int) = {
+      IDLE_WORKER_TIMEOUT_NS_REF.set(TimeUnit.MINUTES.toNanos(minutes))
+    }
 
     setDaemon(true)
 
     override def run() {
       while (true) {
         self.synchronized {
-          if (IDLE_WORKER_TIMEOUT_NS < System.nanoTime() - lastActivityNs) {
+          if (IDLE_WORKER_TIMEOUT_NS_REF.get() < System.nanoTime() - lastActivityNs) {
             cleanupIdleWorkers()
             lastActivityNs = System.nanoTime()
           }
@@ -364,9 +376,9 @@ object PythonWorkerFactory {
 
   object Tool {
     val PROCESS_WAIT_TIMEOUT_MS = 10000
-    val IDLE_WORKER_TIMEOUT_NS = TimeUnit.MINUTES.toNanos(1) // kill idle workers after 1 minute
     val PYTHON_DAEMON_MODULE = "python.daemon.module"
     val PYTHON_WORKER_MODULE = "python.worker.module"
+    val PYTHON_WORKER_IDLE_TIME = "python.worker.idle.time"
     val PYTHON_TASK_KILL_TIMEOUT = "python.task.killTimeout"
     val REDIRECT_IMPL = "python.redirect.impl"
 

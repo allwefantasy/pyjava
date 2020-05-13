@@ -116,7 +116,12 @@ class AppContextImpl(context: JavaContext, _arrowPythonRunner: ArrowPythonRunner
         if (reader != null) {
           reader.close(false)
         }
-        allocator.close()
+        try {
+          allocator.close()
+        } catch {
+          case e: Exception =>
+            logError("allocator.close()", e)
+        }
       }
     }
   }
