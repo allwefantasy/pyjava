@@ -62,7 +62,7 @@ class PythonWorkerFactory(pythonExec: String, envVars: Map[String, String], conf
   private var lastActivityNs = 0L
 
 
-  val monitorThread = new MonitorThread()
+  private val monitorThread = new MonitorThread()
   monitorThread.setWorkerIdleTime(workerIdleTime)
   monitorThread.start()
 
