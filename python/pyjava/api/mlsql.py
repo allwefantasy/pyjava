@@ -224,7 +224,7 @@ class RayContext(object):
                 '''
                 we are not in MLSQL
                 '''
-                context = PythonContext([], {"pythonMode": "ray"})
+                context = PythonContext("", [], {"pythonMode": "ray"})
                 context.rayContext.is_in_mlsql = False
         else:
             raise Exception("context is not set")
