@@ -40,8 +40,9 @@ class SparkSpec extends StreamTest {
           """.stripMargin, envs, "python", "3.6")))), struct,
         timezoneid, Map()
       )
+      val toRow = enconder.createSerializer()
       val newIter = iter.map { irow =>
-        enconder.toRow(irow)
+        toRow(irow)
       }
       val commonTaskContext = new SparkContextImp(TaskContext.get(), batch)
       val columnarBatchIter = batch.compute(Iterator(newIter), TaskContext.getPartitionId(), commonTaskContext)

@@ -18,8 +18,9 @@ class JavaArrowServer extends FunSuite
 
     val dataSchema = StructType(Seq(StructField("value", StringType)))
     val enconder = RowEncoder.apply(dataSchema).resolveAndBind()
+    val toRow = enconder.createSerializer
     val newIter = Seq(Row.fromSeq(Seq("a1")), Row.fromSeq(Seq("a2"))).map { irow =>
-      enconder.toRow(irow)
+      toRow(irow)
     }.iterator
     val javaConext = new JavaContext
     val commonTaskContext = new AppContextImpl(javaConext, null)
@@ -35,7 +36,8 @@ class JavaArrowServer extends FunSuite
     val javaConext = new JavaContext
     val commonTaskContext = new AppContextImpl(javaConext, null)
     val iter = socketRunner.readFromStreamWithArrow("127.0.0.1", 11111, commonTaskContext)
-    iter.foreach(i => println(enconder.fromRow(i.copy())))
+    val fromRow = enconder.createDeserializer()
+    iter.foreach(i => println(fromRow(i.copy())))
     javaConext.close
   }
 }

@@ -6,7 +6,7 @@
 
     <groupId>tech.mlsql</groupId>
     <artifactId>pyjava-3.0_2.12</artifactId>
-    <version>0.2.8.5</version>
+    <version>0.3.0</version>
     <name>pyjava with arrow support</name>
     <url>https://github.com/allwefantasy/pyjava</url>
     <description>

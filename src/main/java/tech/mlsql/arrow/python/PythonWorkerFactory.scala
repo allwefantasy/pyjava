@@ -251,7 +251,7 @@ class PythonWorkerFactory(pythonExec: String, envVars: Map[String, String], conf
   /**
    * Monitor all the idle workers, kill them after timeout.
    */
-  private class MonitorThread extends Thread(s"Idle Worker Monitor for $pythonExec") {
+  class MonitorThread extends Thread(s"Idle Worker Monitor for $pythonExec") {
     //minutes
     val IDLE_WORKER_TIMEOUT_NS_REF = new AtomicLong(TimeUnit.MINUTES.toNanos(1))
 

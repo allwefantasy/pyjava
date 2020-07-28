@@ -40,8 +40,9 @@ class JavaAppSpec extends FunSuite
 
 
     val sourceEnconder = RowEncoder.apply(sourceSchema).resolveAndBind()
+    val toRow = sourceEnconder.createSerializer()
     val newIter = Seq(Row.fromSeq(Seq("a1")), Row.fromSeq(Seq("a2"))).map { irow =>
-      sourceEnconder.toRow(irow).copy()
+      toRow(irow).copy()
     }.iterator
 
     val javaConext = new JavaContext
