@@ -23,11 +23,23 @@ pip uninstall pyjava && pip install pyjava
 
 Setup Java env(Maven is recommended):
 
+For Scala 2.11/Spark 2.4.3
+
 ```xml
 <dependency>
     <groupId>tech.mlsql</groupId>
-    <artifactId>pyjava-2.4_2.12</artifactId>
-    <version>0.2.8.0</version>
+    <artifactId>pyjava-2.4_2.11</artifactId>
+    <version>0.3.0</version>
+</dependency>
+```
+
+For Scala 2.12/Spark 3.0.1
+
+```xml
+<dependency>
+    <groupId>tech.mlsql</groupId>
+    <artifactId>pyjava-3.0_2.12</artifactId>
+    <version>0.3.0</version>
 </dependency>
 ```
 
