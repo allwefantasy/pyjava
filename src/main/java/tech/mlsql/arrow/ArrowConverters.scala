@@ -17,26 +17,25 @@
 
 package tech.mlsql.arrow
 
-import java.io.{ByteArrayInputStream, ByteArrayOutputStream, FileInputStream, OutputStream}
-import java.nio.channels.{Channels, ReadableByteChannel}
-
 import org.apache.arrow.flatbuf.MessageHeader
 import org.apache.arrow.memory.BufferAllocator
 import org.apache.arrow.vector._
-import org.apache.arrow.vector.ipc.message.{ArrowRecordBatch, MessageSerializer}
+import org.apache.arrow.vector.ipc.message.{ArrowRecordBatch, IpcOption, MessageSerializer}
 import org.apache.arrow.vector.ipc.{ArrowStreamWriter, ReadChannel, WriteChannel}
 import org.apache.spark.TaskContext
 import org.apache.spark.api.java.JavaRDD
 import org.apache.spark.network.util.JavaUtils
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types.{StructType, _}
-import org.apache.spark.sql.vectorized.{ArrowColumnVector, ColumnVector, ColumnarBatch}
+import org.apache.spark.sql.vectorized.{ColumnVector, ColumnarBatch}
 import org.apache.spark.sql.{DataFrame, SQLContext, SparkUtils}
 import org.apache.spark.util.TaskCompletionListener
 import tech.mlsql.arrow.context.CommonTaskContext
 import tech.mlsql.arrow.python.iapp.{AppContextImpl, JavaContext}
 import tech.mlsql.arrow.python.ispark.SparkContextImp
 
+import java.io.{ByteArrayInputStream, ByteArrayOutputStream, FileInputStream, OutputStream}
+import java.nio.channels.{Channels, ReadableByteChannel}
 import scala.collection.JavaConverters._
 
 
@@ -50,6 +49,7 @@ class ArrowBatchStreamWriter(
 
   val arrowSchema = ArrowUtils.toArrowSchema(schema, timeZoneId)
   val writeChannel = new WriteChannel(Channels.newChannel(out))
+  val ipcOption = new IpcOption()
 
   // Write the Arrow schema first, before batches
   MessageSerializer.serialize(writeChannel, arrowSchema)
@@ -65,7 +65,7 @@ class ArrowBatchStreamWriter(
    * End the Arrow stream, does not close output stream.
    */
   def end(): Unit = {
-    ArrowStreamWriter.writeEndOfStream(writeChannel)
+    ArrowStreamWriter.writeEndOfStream(writeChannel, ipcOption)
   }
 }
 
@@ -185,7 +185,7 @@ object ArrowConverters {
         arrowRecordBatch.close()
 
         val columns = root.getFieldVectors.asScala.map { vector =>
-          new ArrowColumnVector(vector).asInstanceOf[ColumnVector]
+          new ArrowColumnVectorV2(vector).asInstanceOf[ColumnVector]
         }.toArray
 
         val batch = new ColumnarBatch(columns)

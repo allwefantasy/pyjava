@@ -29,6 +29,7 @@ except ImportError:
     has_resource_module = False
 
 import traceback
+import logging
 
 from pyjava.serializers import \
     write_with_length, \
@@ -40,6 +41,8 @@ if sys.version >= '3':
     basestring = str
 else:
     pass
+
+logging.basicConfig(format='%(asctime)s %(levelname)s:%(message)s', level='DEBUG')
 
 pickleSer = PickleSerializer()
 utf8_deserializer = UTF8Deserializer()
@@ -70,32 +73,34 @@ def main(infile, outfile):
             try:
                 (soft_limit, hard_limit) = resource.getrlimit(total_memory)
                 msg = "Current mem limits: {0} of max {1}\n".format(soft_limit, hard_limit)
-                print(msg, file=sys.stderr)
+                logging.info(msg)
 
                 # convert to bytes
                 new_limit = memory_limit_mb * 1024 * 1024
 
                 if soft_limit == resource.RLIM_INFINITY or new_limit < soft_limit:
                     msg = "Setting mem limits to {0} of max {1}\n".format(new_limit, new_limit)
-                    print(msg, file=sys.stderr)
+                    logging.info(msg)
                     resource.setrlimit(total_memory, (new_limit, new_limit))
 
             except (resource.error, OSError, ValueError) as e:
                 # not all systems support resource limits, so warn instead of failing
-                print("WARN: Failed to set memory limit: {0}\n".format(e), file=sys.stderr)
+                logging.warning("WARN: Failed to set memory limit: {0}\n".format(e))
         split_index = read_int(infile)
-        print("split_index:%s" % split_index)
+        logging.info("split_index:%s" % split_index)
         if split_index == -1:  # for unit tests
             sys.exit(-1)
 
         is_barrier = read_bool(infile)
         bound_port = read_int(infile)
+        logging.info(f"is_barrier {is_barrier}, port {bound_port}")
 
         conf = {}
         for i in range(read_int(infile)):
             k = utf8_deserializer.loads(infile)
             v = utf8_deserializer.loads(infile)
             conf[k] = v
+            logging.debug(f"conf {k}:{v}")
 
         command = utf8_deserializer.loads(infile)
         ser = ArrowStreamSerializer()
