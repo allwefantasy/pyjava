@@ -1,3 +1,4 @@
+import logging
 import os
 import socket
 import sys
@@ -102,7 +103,7 @@ class PythonContext(object):
         return self.output_data
 
     def __del__(self):
-        print("==clean== context")
+        logging.info("==clean== context")
         if self.log_client is not None:
             try:
                 self.log_client.close()
@@ -138,6 +139,7 @@ class PythonContext(object):
             raise Exception("input data can only be fetched once")
         self.have_fetched = True
         for items in self.input_data:
+            logging.debug(f"fetch data {items.to_pydict()}")
             yield pa.Table.from_batches([items]).to_pandas()
 
 
@@ -175,7 +177,6 @@ class RayContext(object):
         self.servers = []
         self.server_ids_in_ray = []
         self.is_setup = False
-        self.rds_list = []
         self.is_dev = utils.is_dev()
         self.is_in_mlsql = True
         self.mock_data = []
@@ -188,24 +189,25 @@ class RayContext(object):
         return self.servers
 
     def data_servers_in_ray(self):
-        import ray
+        from pyjava.rayfix import RayWrapper
+        ray = RayWrapper()
         for server_id in self.server_ids_in_ray:
-            server = ray.experimental.get_actor(server_id)
+            server = ray.get_actor(server_id)
             yield ray.get(server.connect_info.remote())
 
     def build_servers_in_ray(self):
-        import ray
+        from pyjava.rayfix import RayWrapper
         from pyjava.api.serve import RayDataServer
         buffer = []
+        ray = RayWrapper()
         for (server_id, java_server) in zip(self.server_ids_in_ray, self.servers):
-
-            rds = RayDataServer.options(name=server_id, detached=True, max_concurrency=2).remote(server_id, java_server,
-                                                                                                 0,
-                                                                                                 java_server.timezone)
-            self.rds_list.append(rds)
+            rds = ray.options(RayDataServer, name=server_id, detached=True, max_concurrency=2).remote(server_id,
+                                                                                                      java_server,
+                                                                                                      0,
+                                                                                                      java_server.timezone)
             res = ray.get(rds.connect_info.remote())
             if self.is_dev:
-                print("build RayDataServer server_id:{} java_server: {} servers:{}".format(server_id,
+                logging.debug("build RayDataServer server_id:{} java_server: {} servers:{}".format(server_id,
                                                                                            str(vars(
                                                                                                java_server)),
                                                                                            str(vars(res))))
@@ -230,16 +232,18 @@ class RayContext(object):
             raise Exception("context is not set")
 
         if url is not None:
-            import ray
-            ray.shutdown(exiting_interpreter=False)
-            ray.init(redis_address=url)
+            from pyjava.rayfix import RayWrapper
+            ray = RayWrapper()
+            ray.shutdown()
+            ray.init(url)
         return context.rayContext
 
     def setup(self, func_for_row, func_for_rows=None):
         if self.is_setup:
             raise ValueError("setup can be only invoke once")
         self.is_setup = True
-        import ray
+        from pyjava.rayfix import RayWrapper
+        ray = RayWrapper()
 
         if not self.is_in_mlsql:
             if func_for_rows is not None:
@@ -256,7 +260,7 @@ class RayContext(object):
 
         buffer = []
         for server_info in self.build_servers_in_ray():
-            server = ray.experimental.get_actor(server_info.server_id)
+            server = ray.get_actor(server_info.server_id)
             buffer.append(ray.get(server.connect_info.remote()))
             server.serve.remote(func_for_row, func_for_rows)
         items = [vars(server) for server in buffer]

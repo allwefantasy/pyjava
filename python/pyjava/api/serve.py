@@ -1,10 +1,12 @@
-import ray
 import os
 import socket
 import traceback
 
+import ray
+
 import pyjava.utils as utils
 from pyjava.api.mlsql import RayContext
+from pyjava.rayfix import RayWrapper
 from pyjava.serializers import \
     write_with_length, \
     write_int, read_int, \
@@ -60,9 +62,9 @@ class OnceServer(object):
         infile = sockfile  # os.fdopen(os.dup(conn.fileno()), "rb", 65536)
         out = sockfile  # os.fdopen(os.dup(conn.fileno()), "wb", 65536)
         try:
-            write_int(SpecialLengths.START_ARROW_STREAM, out)            
+            write_int(SpecialLengths.START_ARROW_STREAM, out)
             out_data = ([df[name] for name in df] for df in
-                    PythonContext.build_chunk_result(data, 1024))                                    
+                        PythonContext.build_chunk_result(data, 1024))
             self.out_ser.dump_stream(out_data, out)
 
             write_int(SpecialLengths.END_OF_DATA_SECTION, out)
@@ -98,7 +100,7 @@ class RayDataServer(object):
     def __init__(self, server_id, java_server, port=0, timezone="Asia/Harbin"):
 
         self.server = OnceServer(
-            self.get_address(), port, java_server.timezone)
+            RayWrapper().get_address(), port, java_server.timezone)
         try:
             (rel_host, rel_port) = self.server.bind()
         except Exception:
@@ -134,6 +136,3 @@ class RayDataServer(object):
 
     def connect_info(self):
         return DataServerWithId(self.host, self.port, self.server_id)
-
-    def get_address(self):
-        return ray.services.get_node_ip_address()

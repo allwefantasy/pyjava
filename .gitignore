@@ -7,3 +7,5 @@ target/
 python/.eggs/
 __pycache__
 spark-warehouse
+
+*.iml
