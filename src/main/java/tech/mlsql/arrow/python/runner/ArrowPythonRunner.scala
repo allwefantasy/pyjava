@@ -4,9 +4,9 @@ import org.apache.arrow.vector.VectorSchemaRoot
 import org.apache.arrow.vector.ipc.{ArrowStreamReader, ArrowStreamWriter}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types._
-import org.apache.spark.sql.vectorized.{ColumnVector, ColumnarBatch}
+import org.apache.spark.sql.vectorized.{ArrowColumnVector, ColumnVector, ColumnarBatch}
 import tech.mlsql.arrow.context.CommonTaskContext
-import tech.mlsql.arrow.{ArrowColumnVectorV2, ArrowUtils, ArrowWriter, Utils}
+import tech.mlsql.arrow.{ArrowUtils, ArrowWriter, Utils}
 
 import java.io._
 import java.net._
@@ -137,7 +137,7 @@ class ArrowPythonRunner(
                   root = reader.getVectorSchemaRoot()
                   schema = ArrowUtils.fromArrowSchema(root.getSchema())
                   vectors = root.getFieldVectors().asScala.map { vector =>
-                    new ArrowColumnVectorV2(vector)
+                    new ArrowColumnVector(vector)
                   }.toArray[ColumnVector]
                   read()
                 } catch {

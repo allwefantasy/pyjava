@@ -24,11 +24,12 @@ class RayWrapper:
         else:
             return ray.services.get_node_ip_address()
 
-    def init(self, address):
+    def init(self, address, **kwargs):
+        logging.debug(f"address {address} {kwargs}")
         if self.ray_version >= StrictVersion('1.0.0'):
-            ray.init(address=address)
+            ray.init(address=address, **kwargs)
         else:
-            ray.init(redis_address=address)
+            ray.init(redis_address=address, **kwargs)
 
     def shutdown(self):
         if self.ray_version >= StrictVersion('1.0.0'):

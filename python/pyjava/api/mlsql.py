@@ -1,10 +1,10 @@
 import logging
 import os
 import socket
-import sys
 import uuid
 
 import pandas as pd
+import sys
 
 import pyjava.utils as utils
 from pyjava.serializers import ArrowStreamSerializer
@@ -208,15 +208,14 @@ class RayContext(object):
             res = ray.get(rds.connect_info.remote())
             if self.is_dev:
                 logging.debug("build RayDataServer server_id:{} java_server: {} servers:{}".format(server_id,
-                                                                                           str(vars(
-                                                                                               java_server)),
-                                                                                           str(vars(res))))
+                                                                                                   str(vars(
+                                                                                                       java_server)),
+                                                                                                   str(vars(res))))
             buffer.append(res)
         return buffer
 
     @staticmethod
-    def connect(_context, url):
-
+    def connect(_context, url, **kwargs):
         if isinstance(_context, PythonContext):
             context = _context
         elif isinstance(_context, dict):
@@ -235,7 +234,7 @@ class RayContext(object):
             from pyjava.rayfix import RayWrapper
             ray = RayWrapper()
             ray.shutdown()
-            ray.init(url)
+            ray.init(url, **kwargs)
         return context.rayContext
 
     def setup(self, func_for_row, func_for_rows=None):
