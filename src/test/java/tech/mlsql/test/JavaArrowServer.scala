@@ -11,15 +11,15 @@ import tech.mlsql.common.utils.network.NetUtils
 /**
  * 24/12/2019 WilliamZhu(allwefantasy@gmail.com)
  */
-class JavaArrowServer extends FunSuite
-  with BeforeAndAfterAll {
+class JavaArrowServer extends FunSuite with BeforeAndAfterAll {
+
   test("test java arrow server") {
     val socketRunner = new SparkSocketRunner("wow", NetUtils.getHost, "Asia/Harbin")
 
     val dataSchema = StructType(Seq(StructField("value", StringType)))
-    val enconder = RowEncoder.apply(dataSchema).resolveAndBind()
+    val encoder = RowEncoder.apply(dataSchema).resolveAndBind()
     val newIter = Seq(Row.fromSeq(Seq("a1")), Row.fromSeq(Seq("a2"))).map { irow =>
-      enconder.toRow(irow)
+      encoder.toRow(irow)
     }.iterator
     val javaConext = new JavaContext
     val commonTaskContext = new AppContextImpl(javaConext, null)
@@ -38,4 +38,5 @@ class JavaArrowServer extends FunSuite
     iter.foreach(i => println(enconder.fromRow(i.copy())))
     javaConext.close
   }
+
 }

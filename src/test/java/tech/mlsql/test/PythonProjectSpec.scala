@@ -7,8 +7,7 @@ import tech.mlsql.common.utils.path.PathFun
 /**
   * 2019-08-22 WilliamZhu(allwefantasy@gmail.com)
   */
-class PythonProjectSpec extends FunSuite
-  with BeforeAndAfterAll {
+class PythonProjectSpec extends FunSuite with BeforeAndAfterAll {
   test("test python project") {
     val project = getExampleProject("pyproject1")
     val runner = new PythonProjectRunner(project, Map())

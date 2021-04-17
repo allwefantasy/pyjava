@@ -4,10 +4,10 @@ import org.apache.arrow.vector.VectorSchemaRoot
 import org.apache.arrow.vector.ipc.ArrowStreamReader
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types.StructType
-import org.apache.spark.sql.vectorized.{ColumnVector, ColumnarBatch}
+import org.apache.spark.sql.vectorized.{ArrowColumnVector, ColumnVector, ColumnarBatch}
 import org.apache.spark.{SparkException, TaskKilledException}
-import tech.mlsql.arrow.context.CommonTaskContext
 import tech.mlsql.arrow._
+import tech.mlsql.arrow.context.CommonTaskContext
 import tech.mlsql.common.utils.distribute.socket.server.SocketServerInExecutor
 import tech.mlsql.common.utils.log.Logging
 
@@ -81,7 +81,7 @@ class SparkSocketRunner(runnerName: String, host: String, timeZoneId: String) {
                   root = reader.getVectorSchemaRoot()
                   schema = ArrowUtils.fromArrowSchema(root.getSchema())
                   vectors = root.getFieldVectors().asScala.map { vector =>
-                    new ArrowColumnVectorV2(vector)
+                    new ArrowColumnVector(vector)
                   }.toArray[ColumnVector]
                   read()
                 } catch {
