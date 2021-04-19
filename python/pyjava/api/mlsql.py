@@ -1,6 +1,7 @@
 import logging
 import os
 import socket
+import time
 import uuid
 
 import pandas as pd
@@ -189,28 +190,32 @@ class RayContext(object):
         return self.servers
 
     def data_servers_in_ray(self):
+        import ray
         from pyjava.rayfix import RayWrapper
-        ray = RayWrapper()
+        rayw = RayWrapper()
         for server_id in self.server_ids_in_ray:
-            server = ray.get_actor(server_id)
+            server = rayw.get_actor(server_id)
             yield ray.get(server.connect_info.remote())
 
     def build_servers_in_ray(self):
         from pyjava.rayfix import RayWrapper
         from pyjava.api.serve import RayDataServer
+        import ray
         buffer = []
-        ray = RayWrapper()
+        rayw = RayWrapper()
         for (server_id, java_server) in zip(self.server_ids_in_ray, self.servers):
-            rds = ray.options(RayDataServer, name=server_id, detached=True, max_concurrency=2).remote(server_id,
-                                                                                                      java_server,
-                                                                                                      0,
-                                                                                                      java_server.timezone)
+            # rds = RayDataServer.options(name=server_id, detached=True, max_concurrency=2).remote(server_id, java_server,
+            #                                                                                0,
+            #                                                                                java_server.timezone)
+            rds = rayw.options(RayDataServer, name=server_id, detached=True, max_concurrency=2).remote(server_id,
+                                                                                                       java_server,
+                                                                                                       0,
+                                                                                                       java_server.timezone)
             res = ray.get(rds.connect_info.remote())
-            if self.is_dev:
-                logging.debug("build RayDataServer server_id:{} java_server: {} servers:{}".format(server_id,
-                                                                                                   str(vars(
-                                                                                                       java_server)),
-                                                                                                   str(vars(res))))
+            logging.debug("build ray data server server_id:{} java_server: {} servers:{}".format(server_id,
+                                                                                               str(vars(
+                                                                                                   java_server)),
+                                                                                               str(vars(res))))
             buffer.append(res)
         return buffer
 
@@ -241,8 +246,9 @@ class RayContext(object):
         if self.is_setup:
             raise ValueError("setup can be only invoke once")
         self.is_setup = True
+        import ray
         from pyjava.rayfix import RayWrapper
-        ray = RayWrapper()
+        rayw = RayWrapper()
 
         if not self.is_in_mlsql:
             if func_for_rows is not None:
@@ -259,8 +265,9 @@ class RayContext(object):
 
         buffer = []
         for server_info in self.build_servers_in_ray():
-            server = ray.get_actor(server_info.server_id)
-            buffer.append(ray.get(server.connect_info.remote()))
+            server = rayw.get_actor(server_info.server_id)
+            rci = ray.get(server.connect_info.remote())
+            buffer.append(rci)
             server.serve.remote(func_for_row, func_for_rows)
         items = [vars(server) for server in buffer]
         self.python_context.build_result(items, 1024)

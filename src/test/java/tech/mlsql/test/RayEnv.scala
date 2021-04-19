@@ -23,6 +23,11 @@
  */
 package tech.mlsql.test
 
+import java.io.File
+import java.nio.charset.StandardCharsets
+import java.util.TimeZone
+import java.util.regex.Pattern
+
 import com.google.common.io.Files
 import org.apache.spark.TaskContext
 import org.apache.spark.rdd.RDD
@@ -33,14 +38,10 @@ import os.CommandResult
 import tech.mlsql.arrow.python.ispark.SparkContextImp
 import tech.mlsql.arrow.python.runner.SparkSocketRunner
 import tech.mlsql.common.utils.log.Logging
+import tech.mlsql.common.utils.net.NetTool
 import tech.mlsql.common.utils.network.NetUtils
 import tech.mlsql.common.utils.shell.ShellCommand
 import tech.mlsql.test.RayEnv.ServerInfo
-
-import java.io.File
-import java.nio.charset.StandardCharsets
-import java.util.TimeZone
-import java.util.regex.Pattern
 
 class RayEnv extends Logging with Serializable {
 
@@ -49,33 +50,85 @@ class RayEnv extends Logging with Serializable {
 
   @transient var dataServers: Seq[ServerInfo] = _
 
-  def startRay(): Unit = {
-    val result = runWithProfile("ray start --head --num-cpus 2")
+  def startRay(envName: String): Unit = {
+
+    val rayVersionRes = runWithProfile(envName, "ray --version")
+    val rayVersion = rayVersionRes.out.lines.toList.head.split("version").last.trim
+
+    val result = if (rayVersion >= "1.0.0" || rayVersion == "0.8.7") {
+      runWithProfile(envName, "ray start --head")
+    } else {
+      runWithProfile(envName, "ray start --head --include-webui")
+    }
     val initRegex = Pattern.compile(".*ray.init\\((.*)\\).*")
-    result.out.lines.foreach(line => {
+    val errResultLines = result.err.lines.toList
+    val outResultLines = result.out.lines.toList
+
+    errResultLines.foreach(logInfo(_))
+    outResultLines.foreach(logInfo(_))
+
+    (errResultLines ++ outResultLines).foreach(line => {
       val matcher = initRegex.matcher(line)
       if (matcher.matches()) {
         val params = matcher.group(1)
+
+
         val options = params.split(",")
-          .map(param => {
-            val words = param.trim.split("=")
-            (words.head, words(1).substring(1, words(1).length - 1))
-          }).toMap
-        rayAddress = options("address")
-        rayOptions = options - "address"
+          .filter(_.contains("=")).map(param => {
+          val words = param.trim.split("=")
+          (words.head, words(1).substring(1, words(1).length - 1))
+        }).toMap
+
+
+        if (rayAddress == null) {
+          rayAddress = options.getOrElse("address", options.getOrElse("redis_address", null))
+          rayOptions = options - "address" - "redis_address"
+          logInfo(s"Start Ray:${rayAddress}")
+        }
       }
     })
+    
+    if (rayVersion >= "1.0.0") {
+      val initRegex2 = Pattern.compile(".*--address='(.*?)'.*")
+      (errResultLines ++ outResultLines).foreach(line => {
+        val matcher = initRegex2.matcher(line)
+        if (matcher.matches()) {
+          val params = matcher.group(1)
+
+          val host = params.split(":").head
+          rayAddress = host + ":10001"
+          rayOptions = rayOptions
+          new Thread(new Runnable {
+            override def run(): Unit = {
+              runWithProfile(envName,
+                s"""
+                   |python -m ray.util.client.server --host ${host} --port 10001
+                   |""".stripMargin)
+            }
+          }).start()
+          Thread.sleep(3000)
+          logInfo(s"Start Ray:${rayAddress}")
+        }
+      })
+    }
+
+
+    if (rayAddress == null) {
+      throw new RuntimeException("Fail to start ray")
+    }
+
+
   }
 
-  def stopRay(): Unit = {
-    val result = runWithProfile("ray stop")
+  def stopRay(envName: String): Unit = {
+    val result = runWithProfile(envName, "ray stop")
     result
   }
 
   def startDataServer(df: DataFrame): Unit = {
     val dataSchema = df.schema
     dataServers = df.repartition(1).rdd.mapPartitions(iter => {
-      val socketServer = new SparkSocketRunner("serve-runner-for-ut", NetUtils.getHost, TimeZone.getDefault.getID)
+      val socketServer = new SparkSocketRunner("serve-runner-for-ut", NetTool.localHostName(), TimeZone.getDefault.getID)
       val commonTaskContext = new SparkContextImp(TaskContext.get(), null)
       val rab = RowEncoder.apply(dataSchema).resolveAndBind()
       val newIter = iter.map(row => {
@@ -99,8 +152,9 @@ class RayEnv extends Logging with Serializable {
   }
 
 
-  private def runWithProfile(command: String): CommandResult = {
+  private def runWithProfile(envName: String, command: String): CommandResult = {
     val tmpShellFile = File.createTempFile("shell", ".sh")
+    val setupEnv = if (envName.trim.startsWith("conda") || envName.trim.startsWith("source")) envName else s"""conda activate ${envName}"""
     try {
       Files.write(
         s"""
@@ -108,14 +162,14 @@ class RayEnv extends Logging with Serializable {
            |export LC_ALL=en_US.utf-8
            |export LANG=en_US.utf-8
            |
-           |source ~/.bash_profile
-           |conda activate dev
+           |# source ~/.bash_profile
+           |${setupEnv}
            |${command}
            |""".stripMargin, tmpShellFile, StandardCharsets.UTF_8)
       val cmdResult = ShellCommand.execCmdV2("/bin/bash", tmpShellFile.getAbsolutePath)
-      if (cmdResult.exitCode != 0) {
-        throw new RuntimeException(s"run command failed ${cmdResult.toString()}")
-      }
+      //      if (cmdResult.exitCode != 0) {
+      //        throw new RuntimeException(s"run command failed ${cmdResult.toString()}")
+      //      }
       cmdResult
     } finally {
       tmpShellFile.delete()
