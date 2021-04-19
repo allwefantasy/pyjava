@@ -27,13 +27,19 @@ class RayWrapper:
     def init(self, address, **kwargs):
         logging.debug(f"address {address} {kwargs}")
         if self.ray_version >= StrictVersion('1.0.0'):
+            logging.debug(f"try to connect to ray {address}")
+            ray.util.connect(conn_str=address, **kwargs)
+        elif self.ray_version == StrictVersion('0.8.7'):
             ray.init(address=address, **kwargs)
         else:
             ray.init(redis_address=address, **kwargs)
 
     def shutdown(self):
         if self.ray_version >= StrictVersion('1.0.0'):
-            ray.shutdown(_exiting_interpreter=False)
+            try:
+                ray.util.disconnect()
+            except Exception as e:
+                pass
         else:
             ray.shutdown(exiting_interpreter=False)
 
@@ -41,12 +47,13 @@ class RayWrapper:
         if 'detached' in kwargs and self.ray_version >= StrictVersion('1.0.0'):
             del kwargs['detached']
             kwargs['lifetime'] = 'detached'
-        logging.debug(f"options: {kwargs}")
+        logging.debug(f"actor build options: {kwargs}")
         return actor_class.options(**kwargs)
 
     def get_actor(self, name):
         if self.ray_version >= StrictVersion('1.0.0'):
             return ray.get_actor(name)
+        elif self.ray_version == StrictVersion('0.8.7'):
+            return ray.get_actor(name)
         else:
             return ray.experimental.get_actor(name)
-

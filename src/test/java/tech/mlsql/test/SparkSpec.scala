@@ -1,21 +1,10 @@
 package tech.mlsql.test
 
 import java.util
-import org.apache.spark.TaskContext
-import org.apache.spark.sql.{Row, SparkUtils}
-import org.apache.spark.sql.catalyst.encoders.RowEncoder
-import org.apache.spark.sql.streaming.StreamTest
-import org.apache.spark.sql.types.{LongType, StructField, StructType}
-import tech.mlsql.arrow.python.ispark._
-import tech.mlsql.arrow.python.runner.{ArrowPythonRunner, ChainedPythonFunctions, PythonConf, PythonFunction, SparkSocketRunner}
-import tech.mlsql.common.utils.lang.sc.ScalaMethodMacros.str
-import tech.mlsql.common.utils.network.NetUtils
-import tech.mlsql.test.RayEnv.ServerInfo
-import tech.mlsql.test.function.SparkFunctions
-import tech.mlsql.test.function.SparkFunctions.MockData
 
-import java.util
-import scala.collection.JavaConverters._
+import org.apache.spark.sql.streaming.StreamTest
+import org.apache.spark.sql.{Row, SparkUtils}
+import tech.mlsql.test.function.SparkFunctions.MockData
 
 /**
  * 2019-08-14 WilliamZhu(allwefantasy@gmail.com)
@@ -24,43 +13,9 @@ class SparkSpec extends StreamTest {
 
   val rayEnv = new RayEnv
 
+  def condaEnv = "source /Users/allwefantasy/opt/anaconda3/bin/activate ray1.2"
+
   //spark.executor.heartbeatInterval
-  test("spark") {
-    val session = spark
-    import session.implicits._
-    val timezoneid = session.sessionState.conf.sessionLocalTimeZone
-    val df = session.createDataset[String](Seq("a1", "b1")).toDF("value")
-    val struct = df.schema
-    val abc = df.rdd.mapPartitions { iter =>
-      val encoder = RowEncoder.apply(struct).resolveAndBind()
-      val envs = new util.HashMap[String, String]()
-      envs.put(str(PythonConf.PYTHON_ENV), "source activate dev && export ARROW_PRE_0_15_IPC_FORMAT=1")
-      val batch = new ArrowPythonRunner(
-        Seq(ChainedPythonFunctions(Seq(PythonFunction(
-          """
-            |import pandas as pd
-            |import numpy as np
-            |for item in data_manager.fetch_once():
-            |    print(item)
-            |df = pd.DataFrame({'AAA': [4, 5, 6, 7],'BBB': [10, 20, 30, 40],'CCC': [100, 50, -30, -50]})
-            |data_manager.set_output([[df['AAA'],df['BBB']]])
-          """.stripMargin, envs, "python", "3.6")))), struct,
-        timezoneid, Map()
-      )
-      val newIter = iter.map { irow =>
-        encoder.toRow(irow)
-      }
-      val commonTaskContext = new SparkContextImp(TaskContext.get(), batch)
-      val columnarBatchIter = batch.compute(Iterator(newIter), TaskContext.getPartitionId(), commonTaskContext)
-      columnarBatchIter.flatMap { batch =>
-        batch.rowIterator.asScala
-      }.map(f => f.copy())
-    }
-
-    val wow = SparkUtils.internalCreateDataFrame(session, abc, StructType(Seq(StructField("AAA", LongType), StructField("BBB", LongType))), false)
-    wow.show()
-  }
-
   test("test python ray connect") {
     val session = spark
     import session.implicits._
@@ -70,7 +25,30 @@ class SparkSpec extends StreamTest {
     rayEnv.startDataServer(dataDF)
 
     val df = session.createDataset(rayEnv.dataServers).toDF()
-    val outputDF = df.rdd.mapPartitions(SparkFunctions.testScript1(df.schema, rayEnv.rayAddress, timezoneId))
+
+    val envs = new util.HashMap[String, String]()
+    envs.put("PYTHON_ENV", s"${condaEnv};export ARROW_PRE_0_15_IPC_FORMAT=1")
+    //envs.put("PYTHONPATH", (os.pwd / "python").toString())
+
+    val aps = new ApplyPythonScript(rayEnv.rayAddress, envs, timezoneId)
+    val rayAddress = rayEnv.rayAddress
+    logInfo(rayAddress)
+    val func = aps.execute(
+      s"""
+         |import ray
+         |import time
+         |from pyjava.api.mlsql import RayContext
+         |import numpy as np;
+         |ray_context = RayContext.connect(globals(),"${rayAddress}")
+         |def echo(row):
+         |    row1 = {}
+         |    row1["title"]=row['title'][1:]
+         |    row1["body"]= row["body"] + ',' + row["body"]
+         |    return row1
+         |ray_context.foreach(echo)
+          """.stripMargin, df.schema)
+
+    val outputDF = df.rdd.mapPartitions(func)
 
     val pythonServers = SparkUtils.internalCreateDataFrame(session, outputDF, df.schema).collect()
 
@@ -87,11 +65,11 @@ class SparkSpec extends StreamTest {
 
   override def beforeAll(): Unit = {
     super.beforeAll()
-    rayEnv.startRay()
+    rayEnv.startRay(condaEnv)
   }
 
   override def afterAll(): Unit = {
-    rayEnv.stopRay()
+    rayEnv.stopRay(condaEnv)
     super.afterAll()
   }
 

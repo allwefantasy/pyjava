@@ -1,3 +1,4 @@
+import logging
 import os
 import socket
 import traceback
@@ -98,13 +99,13 @@ class OnceServer(object):
 class RayDataServer(object):
 
     def __init__(self, server_id, java_server, port=0, timezone="Asia/Harbin"):
-
         self.server = OnceServer(
             RayWrapper().get_address(), port, java_server.timezone)
         try:
             (rel_host, rel_port) = self.server.bind()
-        except Exception:
+        except Exception as e:
             print(traceback.format_exc())
+            raise e
 
         self.host = rel_host
         self.port = rel_port
@@ -123,6 +124,7 @@ class RayDataServer(object):
                     RayContext.fetch_once_as_rows(self.java_server))
             self.server.serve(data)
         except Exception as e:
+            logging.error(f"Fail to processing data in  Ray Data Server {self.host}:{self.port}")
             raise e
         finally:
             self.close()
