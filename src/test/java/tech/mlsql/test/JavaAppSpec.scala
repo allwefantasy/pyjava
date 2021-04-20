@@ -2,7 +2,7 @@ package tech.mlsql.test
 
 import java.util
 
-import org.apache.spark.TaskContext
+import org.apache.spark.{TaskContext, WowRowEncoder}
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.encoders.RowEncoder
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
@@ -42,9 +42,9 @@ class JavaAppSpec extends FunSuite
     )
 
 
-    val sourceEnconder = RowEncoder.apply(sourceSchema).resolveAndBind()
+    val sourceEnconder  = WowRowEncoder.fromRow(sourceSchema) //RowEncoder.apply(sourceSchema).resolveAndBind()
     val newIter = Seq(Row.fromSeq(Seq("a1")), Row.fromSeq(Seq("a2"))).map { irow =>
-      sourceEnconder.toRow(irow).copy()
+      sourceEnconder(irow).copy()
     }.iterator
 
     val javaConext = new JavaContext

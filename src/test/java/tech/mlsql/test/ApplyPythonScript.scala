@@ -1,6 +1,6 @@
 package tech.mlsql.test
 
-import org.apache.spark.TaskContext
+import org.apache.spark.{TaskContext, WowRowEncoder}
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.encoders.RowEncoder
@@ -21,13 +21,14 @@ class ApplyPythonScript(_rayAddress: String, _envs: java.util.HashMap[String, St
     val pythonMode = _pythonMode
 
     iter =>
-      val encoder = RowEncoder.apply(struct).resolveAndBind()
+      val encoder = WowRowEncoder.fromRow(struct)
+        //RowEncoder.apply(struct).resolveAndBind()
       val batch = new ArrowPythonRunner(
         Seq(ChainedPythonFunctions(Seq(PythonFunction(
           script, envs, "python", "3.6")))), struct,
         timezoneId, Map("pythonMode" -> pythonMode)
       )
-      val newIter = iter.map(encoder.toRow)
+      val newIter = iter.map(encoder)
       val commonTaskContext = new SparkContextImp(TaskContext.get(), batch)
       val columnarBatchIter = batch.compute(Iterator(newIter), TaskContext.getPartitionId(), commonTaskContext)
       columnarBatchIter.flatMap(_.rowIterator.asScala).map(f => f.copy())

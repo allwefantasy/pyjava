@@ -23,16 +23,15 @@
  */
 package tech.mlsql.test.function
 
-import org.apache.spark.TaskContext
+import org.apache.spark.{TaskContext, WowRowEncoder}
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.encoders.RowEncoder
 import org.apache.spark.sql.types.StructType
 import tech.mlsql.arrow.python.ispark.SparkContextImp
 import tech.mlsql.arrow.python.runner.{ArrowPythonRunner, ChainedPythonFunctions, PythonConf, PythonFunction}
 import tech.mlsql.common.utils.lang.sc.ScalaMethodMacros.str
-
 import java.util
+
 import scala.collection.JavaConverters.asScalaIteratorConverter
 
 object SparkFunctions {
@@ -41,7 +40,7 @@ object SparkFunctions {
 
   def testScript1(struct: StructType, rayAddress: String, timezoneId: String): Iterator[Row] => Iterator[InternalRow] = {
     iter =>
-      val encoder = RowEncoder.apply(struct).resolveAndBind()
+      val encoder = WowRowEncoder.fromRow(struct)
       val envs = new util.HashMap[String, String]()
       envs.put(str(PythonConf.PYTHON_ENV), "source ~/.bash_profile && conda activate dev && export ARROW_PRE_0_15_IPC_FORMAT=1")
       envs.put("PYTHONPATH", (os.pwd / "python").toString())
@@ -62,7 +61,7 @@ object SparkFunctions {
           """.stripMargin, envs, "python", "3.6")))), struct,
         timezoneId, Map("pythonMode" -> "ray")
       )
-      val newIter = iter.map(encoder.toRow)
+      val newIter = iter.map(encoder)
       val commonTaskContext = new SparkContextImp(TaskContext.get(), batch)
       val columnarBatchIter = batch.compute(Iterator(newIter), TaskContext.getPartitionId(), commonTaskContext)
       columnarBatchIter.flatMap(_.rowIterator.asScala).map(f => f.copy())

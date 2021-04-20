@@ -1,7 +1,7 @@
 package tech.mlsql.test
 
+import org.apache.spark.WowRowEncoder
 import org.apache.spark.sql.Row
-import org.apache.spark.sql.catalyst.encoders.RowEncoder
 import org.apache.spark.sql.types.{LongType, StringType, StructField, StructType}
 import org.scalatest.{BeforeAndAfterAll, FunSuite}
 import tech.mlsql.arrow.python.iapp.{AppContextImpl, JavaContext}
@@ -17,9 +17,9 @@ class JavaArrowServer extends FunSuite with BeforeAndAfterAll {
     val socketRunner = new SparkSocketRunner("wow", NetUtils.getHost, "Asia/Harbin")
 
     val dataSchema = StructType(Seq(StructField("value", StringType)))
-    val encoder = RowEncoder.apply(dataSchema).resolveAndBind()
+    val encoder = WowRowEncoder.fromRow(dataSchema) //RowEncoder.apply(dataSchema).resolveAndBind()
     val newIter = Seq(Row.fromSeq(Seq("a1")), Row.fromSeq(Seq("a2"))).map { irow =>
-      encoder.toRow(irow)
+      encoder(irow)
     }.iterator
     val javaConext = new JavaContext
     val commonTaskContext = new AppContextImpl(javaConext, null)
@@ -30,12 +30,12 @@ class JavaArrowServer extends FunSuite with BeforeAndAfterAll {
   }
 
   test("test read python arrow server") {
-    val enconder = RowEncoder.apply(StructType(Seq(StructField("a", LongType),StructField("b", LongType)))).resolveAndBind()
+    val enconder = WowRowEncoder.toRow(StructType(Seq(StructField("a", LongType),StructField("b", LongType))))
     val socketRunner = new SparkSocketRunner("wow", NetUtils.getHost, "Asia/Harbin")
     val javaConext = new JavaContext
     val commonTaskContext = new AppContextImpl(javaConext, null)
     val iter = socketRunner.readFromStreamWithArrow("127.0.0.1", 11111, commonTaskContext)
-    iter.foreach(i => println(enconder.fromRow(i.copy())))
+    iter.foreach(i => println(enconder(i.copy())))
     javaConext.close
   }
 

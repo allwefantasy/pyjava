@@ -29,10 +29,9 @@ import java.util.TimeZone
 import java.util.regex.Pattern
 
 import com.google.common.io.Files
-import org.apache.spark.TaskContext
+import org.apache.spark.{TaskContext, WowRowEncoder}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.encoders.RowEncoder
 import org.apache.spark.sql.{DataFrame, Row}
 import os.CommandResult
 import tech.mlsql.arrow.python.ispark.SparkContextImp
@@ -130,9 +129,9 @@ class RayEnv extends Logging with Serializable {
     dataServers = df.repartition(1).rdd.mapPartitions(iter => {
       val socketServer = new SparkSocketRunner("serve-runner-for-ut", NetTool.localHostName(), TimeZone.getDefault.getID)
       val commonTaskContext = new SparkContextImp(TaskContext.get(), null)
-      val rab = RowEncoder.apply(dataSchema).resolveAndBind()
+      val rab = WowRowEncoder.fromRow(dataSchema) //RowEncoder.apply(dataSchema).resolveAndBind()
       val newIter = iter.map(row => {
-        rab.toRow(row)
+        rab(row)
       })
       val Array(_server, _host: String, _port: Int) = socketServer.serveToStreamWithArrow(newIter, dataSchema, 10, commonTaskContext)
       Seq(ServerInfo(_host, _port, TimeZone.getDefault.getID)).iterator

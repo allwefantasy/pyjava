@@ -6,6 +6,7 @@
 
     <groupId>tech.mlsql</groupId>
     <artifactId>pyjava-2.4_2.11</artifactId>
+    <packaging>pom</packaging>
     <version>0.3.0</version>
     <name>pyjava with arrow support</name>
     <url>https://github.com/allwefantasy/pyjava</url>
@@ -48,13 +49,6 @@
         <spark.bigversion>2.4</spark.bigversion>
         <arrow.version>0.10.0</arrow.version>
 
-        <!--        <scala.version>2.12.8</scala.version>-->
-        <!--        <scala.binary.version>2.12</scala.binary.version>-->
-        <!--        <scala.jline.version>2.12.1</scala.jline.version>-->
-        <!--        <spark.version>3.0.0-preview2</spark.version>-->
-        <!--        <spark.bigversion>3.0</spark.bigversion>-->
-        <!--        <arrow.version>0.15.1</arrow.version>-->
-
         <guava.version>16.0</guava.version>
         <httpclient.version>4.5.3</httpclient.version>
         <scope>provided</scope>
@@ -63,6 +57,160 @@
         <serviceframework.version>2.0.6</serviceframework.version>
 
     </properties>
+
+    <profiles>
+        <profile>
+            <id>scala-2.11</id>
+            <properties>
+                <scala.version>2.11.0</scala.version>
+                <scala.binary.version>2.11</scala.binary.version>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-enforcer-plugin</artifactId>
+                        <version>3.0.0-M1</version>
+                        <executions>
+                            <execution>
+                                <id>enforce-versions</id>
+                                <goals>
+                                    <goal>enforce</goal>
+                                </goals>
+                                <configuration>
+                                    <rules>
+                                        <bannedDependencies>
+                                            <excludes combine.children="append">
+                                                <exclude>*:*_2.12</exclude>
+                                            </excludes>
+                                        </bannedDependencies>
+                                    </rules>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <profile>
+            <id>scala-2.12</id>
+            <properties>
+                <scala.version>2.12.10</scala.version>
+                <scala.binary.version>2.12</scala.binary.version>
+            </properties>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-enforcer-plugin</artifactId>
+                        <executions>
+                            <execution>
+                                <id>enforce-versions</id>
+                                <goals>
+                                    <goal>enforce</goal>
+                                </goals>
+                                <configuration>
+                                    <rules>
+                                        <bannedDependencies>
+                                            <excludes combine.children="append">
+                                                <exclude>*:*_2.11</exclude>
+                                            </excludes>
+                                        </bannedDependencies>
+                                    </rules>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+
+        </profile>
+
+        <profile>
+            <id>spark-2.4.3</id>
+            <properties>
+                <spark.version>2.4.3</spark.version>
+                <spark.bigversion>2.4</spark.bigversion>
+            </properties>
+            <modules>
+                <module>spark-2.4.x-adaptor</module>
+            </modules>
+
+            <dependencies>
+                <dependency>
+                    <groupId>tech.mlsql</groupId>
+                    <artifactId>spark-2.4.x-adaptor_${scala.binary.version}</artifactId>
+                    <version>${project.version}</version>
+                </dependency>
+            </dependencies>
+
+        </profile>
+
+
+        <profile>
+            <id>spark-3.0.0</id>
+            <properties>
+                <spark.version>3.0.0</spark.version>
+                <spark.bigversion>3.0</spark.bigversion>
+                <arrow.version>0.15.1</arrow.version>
+                <fasterxml.jackson.version>2.10.0</fasterxml.jackson.version>
+            </properties>
+            <modules>
+                <module>spark-3.0.x-adaptor</module>
+            </modules>
+            <dependencies>
+                <dependency>
+                    <groupId>tech.mlsql</groupId>
+                    <artifactId>spark-3.0.x-adaptor_${scala.binary.version}</artifactId>
+                    <version>${project.version}</version>
+                </dependency>
+                <dependency>
+                    <groupId>com.fasterxml.jackson.core</groupId>
+                    <artifactId>jackson-core</artifactId>
+                    <version>${fasterxml.jackson.version}</version>
+                    <scope>${scope}</scope>
+                </dependency>
+            </dependencies>
+        </profile>
+        <profile>
+            <id>disable-java8-doclint</id>
+            <activation>
+                <jdk>[1.8,)</jdk>
+            </activation>
+            <properties>
+                <additionalparam>-Xdoclint:none</additionalparam>
+                <doclint>none</doclint>
+            </properties>
+        </profile>
+        <profile>
+            <id>release-sign-artifacts</id>
+            <activation>
+                <property>
+                    <name>performRelease</name>
+                    <value>true</value>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-gpg-plugin</artifactId>
+                        <version>1.1</version>
+                        <executions>
+                            <execution>
+                                <id>sign-artifacts</id>
+                                <phase>verify</phase>
+                                <goals>
+                                    <goal>sign</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 
     <dependencies>
         <dependency>
@@ -195,46 +343,6 @@
         </dependency>
     </dependencies>
 
-    <profiles>
-
-        <profile>
-            <id>disable-java8-doclint</id>
-            <activation>
-                <jdk>[1.8,)</jdk>
-            </activation>
-            <properties>
-                <additionalparam>-Xdoclint:none</additionalparam>
-                <doclint>none</doclint>
-            </properties>
-        </profile>
-        <profile>
-            <id>release-sign-artifacts</id>
-            <activation>
-                <property>
-                    <name>performRelease</name>
-                    <value>true</value>
-                </property>
-            </activation>
-            <build>
-                <plugins>
-                    <plugin>
-                        <groupId>org.apache.maven.plugins</groupId>
-                        <artifactId>maven-gpg-plugin</artifactId>
-                        <version>1.1</version>
-                        <executions>
-                            <execution>
-                                <id>sign-artifacts</id>
-                                <phase>verify</phase>
-                                <goals>
-                                    <goal>sign</goal>
-                                </goals>
-                            </execution>
-                        </executions>
-                    </plugin>
-                </plugins>
-            </build>
-        </profile>
-    </profiles>
 
     <build>
         <resources>
