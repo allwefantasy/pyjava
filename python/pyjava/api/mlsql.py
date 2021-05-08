@@ -140,7 +140,6 @@ class PythonContext(object):
             raise Exception("input data can only be fetched once")
         self.have_fetched = True
         for items in self.input_data:
-            logging.debug(f"fetch data {items.to_pydict()}")
             yield pa.Table.from_batches([items]).to_pandas()
 
 

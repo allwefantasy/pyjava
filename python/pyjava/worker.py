@@ -42,7 +42,7 @@ if sys.version >= '3':
 else:
     pass
 
-logging.basicConfig(format='%(asctime)s %(levelname)s:%(message)s', level='DEBUG')
+# logging.basicConfig(format='%(asctime)s %(levelname)s:%(message)s', level='DEBUG')
 
 pickleSer = PickleSerializer()
 utf8_deserializer = UTF8Deserializer()
