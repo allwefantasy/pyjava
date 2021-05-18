@@ -45,7 +45,7 @@
 
         <manifold.version>2021.1.12</manifold.version>
 
-        <scala.version>2.11.8</scala.version>
+        <scala.version>2.11.12</scala.version>
         <scala.binary.version>2.11</scala.binary.version>
         <spark.version>2.4.3</spark.version>
         <spark.bigversion>2.4</spark.bigversion>
@@ -145,6 +145,10 @@
                 </exclusion>
             </exclusions>
         </dependency>
+
+        
+
+        
         <dependency>
             <groupId>org.apache.arrow</groupId>
             <artifactId>arrow-memory</artifactId>
@@ -172,6 +176,7 @@
                 </exclusion>
             </exclusions>
         </dependency>
+        
         <dependency>
             <groupId>org.apache.spark</groupId>
             <artifactId>spark-core_${scala.binary.version}</artifactId>
@@ -368,29 +373,29 @@
                 </executions>
             </plugin>
 
-<!--            <plugin>-->
-<!--                <groupId>org.apache.maven.plugins</groupId>-->
-<!--                <artifactId>maven-compiler-plugin</artifactId>-->
-<!--                <version>3.8.0</version>-->
-<!--                <configuration>-->
-<!--                    <source>1.8</source>-->
-<!--                    <target>1.8</target>-->
-<!--                    <encoding>UTF-8</encoding>-->
-<!--                    <compilerArgs>-->
-<!--                        &lt;!&ndash; Configure manifold plugin &ndash;&gt;-->
-<!--                        <arg>-Xplugin:Manifold</arg>-->
-<!--                    </compilerArgs>-->
-<!--                    &lt;!&ndash; Add the processor path for the plugin &ndash;&gt;-->
-<!--                    <annotationProcessorPaths>-->
-<!--                        <path>-->
-<!--                            <groupId>systems.manifold</groupId>-->
-<!--                            <artifactId>manifold-preprocessor</artifactId>-->
-<!--                            <version>${manifold.version}</version>-->
-<!--                        </path>-->
-<!--                    </annotationProcessorPaths>-->
-<!--                </configuration>-->
-<!--            </plugin>-->
-            
+            <!--            <plugin>-->
+            <!--                <groupId>org.apache.maven.plugins</groupId>-->
+            <!--                <artifactId>maven-compiler-plugin</artifactId>-->
+            <!--                <version>3.8.0</version>-->
+            <!--                <configuration>-->
+            <!--                    <source>1.8</source>-->
+            <!--                    <target>1.8</target>-->
+            <!--                    <encoding>UTF-8</encoding>-->
+            <!--                    <compilerArgs>-->
+            <!--                        &lt;!&ndash; Configure manifold plugin &ndash;&gt;-->
+            <!--                        <arg>-Xplugin:Manifold</arg>-->
+            <!--                    </compilerArgs>-->
+            <!--                    &lt;!&ndash; Add the processor path for the plugin &ndash;&gt;-->
+            <!--                    <annotationProcessorPaths>-->
+            <!--                        <path>-->
+            <!--                            <groupId>systems.manifold</groupId>-->
+            <!--                            <artifactId>manifold-preprocessor</artifactId>-->
+            <!--                            <version>${manifold.version}</version>-->
+            <!--                        </path>-->
+            <!--                    </annotationProcessorPaths>-->
+            <!--                </configuration>-->
+            <!--            </plugin>-->
+
         </plugins>
     </build>
     <distributionManagement>
