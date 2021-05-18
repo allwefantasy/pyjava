@@ -43,6 +43,28 @@ For Scala 2.12/Spark 3.0.1
 </dependency>
 ```
 
+# Build Mannually
+
+Install Build Tool:
+
+```
+pip install mlsql_plugin_tool
+```
+
+Build for Spark 3.1.1:
+
+```
+mlsql_plugin_tool spark311
+mvn clean install -DskipTests -Pdisable-java8-doclint -Prelease-sign-artifactsmvn
+```
+
+Build For Spark 2.4.3
+
+```
+mlsql_plugin_tool spark243
+mvn clean install -DskipTests -Pdisable-java8-doclint -Prelease-sign-artifactsmvn
+```
+
 
 ## Using python code snippet to process data in Java/Scala
 
