@@ -2,16 +2,18 @@ package tech.mlsql.test
 
 import java.util
 
-import org.apache.spark.sql.streaming.StreamTest
-import org.apache.spark.sql.{Row, SparkUtils}
+import org.apache.spark.sql.{Row, SparkSession, SparkUtils}
+import org.scalatest.{BeforeAndAfterAll, FunSuite}
+import tech.mlsql.common.utils.log.Logging
 import tech.mlsql.test.function.SparkFunctions.MockData
 
 /**
  * 2019-08-14 WilliamZhu(allwefantasy@gmail.com)
  */
-class SparkSpec extends StreamTest {
+class SparkSpec extends FunSuite with BeforeAndAfterAll with Logging{
 
   val rayEnv = new RayEnv
+  var spark: SparkSession = null
 
   def condaEnv = "source /Users/allwefantasy/opt/anaconda3/bin/activate ray1.2"
 
@@ -64,11 +66,15 @@ class SparkSpec extends StreamTest {
   }
 
   override def beforeAll(): Unit = {
+    spark = SparkSession.builder().master("local[*]").appName("test").getOrCreate()
     super.beforeAll()
     rayEnv.startRay(condaEnv)
   }
 
   override def afterAll(): Unit = {
+    if (spark != null) {
+      spark.sparkContext.stop()
+    }
     rayEnv.stopRay(condaEnv)
     super.afterAll()
   }

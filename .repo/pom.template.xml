@@ -5,7 +5,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>tech.mlsql</groupId>
-    <artifactId>pyjava-2.4_2.11</artifactId>
+    <artifactId>pyjava-{{spark_binary_version}}_{{scala_binary_version}}</artifactId>
     <packaging>pom</packaging>
     <version>0.3.0</version>
     <name>pyjava with arrow support</name>
@@ -45,11 +45,11 @@
 
         <manifold.version>2021.1.12</manifold.version>
 
-        <scala.version>2.11.12</scala.version>
-        <scala.binary.version>2.11</scala.binary.version>
-        <spark.version>2.4.3</spark.version>
-        <spark.bigversion>2.4</spark.bigversion>
-        <arrow.version>0.10.0</arrow.version>
+        <scala.version>{{scala_version}}</scala.version>
+        <scala.binary.version>{{scala_binary_version}}</scala.binary.version>
+        <spark.version>{{spark_version}}</spark.version>
+        <spark.bigversion>{{spark_binary_version}}</spark.bigversion>
+        <arrow.version>{{arrow_version}}</arrow.version>
 
         <guava.version>16.0</guava.version>
         <httpclient.version>4.5.3</httpclient.version>
@@ -146,9 +146,15 @@
             </exclusions>
         </dependency>
 
-        
+        {% if spark_binary_version=="3.0" %}
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-core</artifactId>
+            <version>2.10.1</version>
+        </dependency>
+        {% endif %}
 
-        
+        {% if spark_binary_version=="2.4" %}
         <dependency>
             <groupId>org.apache.arrow</groupId>
             <artifactId>arrow-memory</artifactId>
@@ -176,7 +182,7 @@
                 </exclusion>
             </exclusions>
         </dependency>
-        
+        {% endif %}
         <dependency>
             <groupId>org.apache.spark</groupId>
             <artifactId>spark-core_${scala.binary.version}</artifactId>
