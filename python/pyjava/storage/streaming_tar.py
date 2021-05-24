@@ -5,7 +5,7 @@ import tempfile
 
 import uuid
 
-BLOCK_SIZE = 1024 * 1024
+BLOCK_SIZE = 1024 * 64
 
 
 class FileStream(object):
@@ -60,8 +60,8 @@ def stream_build_tar(file_dir, streaming_fp):
     for root, dirs, files in os.walk(file_dir):
         for in_filename in files:
             stat = os.stat(os.path.join(root, in_filename))
-            tar_info = tarfile.TarInfo(in_filename)
-
+            tar_info = tarfile.TarInfo(os.path.join(root.lstrip(file_dir), in_filename))
+            # tar_info.path = root.lstrip(file_dir)
             tar_info.mtime = stat.st_mtime
             tar_info.size = stat.st_size
 
@@ -95,9 +95,8 @@ def stream_build_tar(file_dir, streaming_fp):
 
 
 def main():
-    target_dir = "/Users/allwefantasy/Downloads/mnist"
-    rows = build_rows_from_file(target_dir)
-    save_rows_as_file(rows, "/Users/allwefantasy/Downloads/mnist2")
+    rows = build_rows_from_file("/Users/allwefantasy/data/mlsql/homes/demo/tmp/minist_model")
+    save_rows_as_file(rows, "/Users/allwefantasy/data/mlsql/homes/demo/tmp/minist_model3")
 
 
 if __name__ == '__main__':

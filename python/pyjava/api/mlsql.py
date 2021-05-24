@@ -11,7 +11,7 @@ import pyjava.utils as utils
 from pyjava.serializers import ArrowStreamSerializer
 from pyjava.serializers import read_int
 from pyjava.utils import utf8_deserializer
-from storage import streaming_tar
+from pyjava.storage import streaming_tar
 
 if sys.version >= '3':
     basestring = str
