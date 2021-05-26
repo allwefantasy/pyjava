@@ -148,6 +148,8 @@ class PythonContext(object):
             yield pa.Table.from_batches([items]).to_pandas()
 
     def fetch_as_dir(self, target_dir):
+        if len(self.data_servers()) > 1:
+            raise Exception("Please make sure you have only one partition on Java/Spark Side")
         items = self.fetch_once_as_rows()
         streaming_tar.save_rows_as_file(items, target_dir)
 
@@ -297,6 +299,9 @@ class RayContext(object):
             raise Exception("Please make sure you have only one partition on Java/Spark Side")
         items = self.collect()
         streaming_tar.save_rows_as_file(items, target_dir)
+
+    def build_result(self, items, block_size=1024):
+        self.python_context.build_result(items, block_size)
 
     @staticmethod
     def fetch_as_repeatable_file(context_id, data_servers, file_ref, batch_size):
