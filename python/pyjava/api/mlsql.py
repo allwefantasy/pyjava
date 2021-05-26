@@ -11,6 +11,7 @@ import pyjava.utils as utils
 from pyjava.serializers import ArrowStreamSerializer
 from pyjava.serializers import read_int
 from pyjava.utils import utf8_deserializer
+from pyjava.storage import streaming_tar
 
 if sys.version >= '3':
     basestring = str
@@ -100,6 +101,10 @@ class PythonContext(object):
         self.output_data = ([df[name] for name in df]
                             for df in PythonContext.build_chunk_result(items, block_size))
 
+    def build_result_from_dir(self, target_dir, block_size=1024):
+        items = streaming_tar.build_rows_from_file(target_dir)
+        self.build_result(items, block_size)
+
     def output(self):
         return self.output_data
 
@@ -141,6 +146,12 @@ class PythonContext(object):
         self.have_fetched = True
         for items in self.input_data:
             yield pa.Table.from_batches([items]).to_pandas()
+
+    def fetch_as_dir(self, target_dir):
+        if len(self.data_servers()) > 1:
+            raise Exception("Please make sure you have only one partition on Java/Spark Side")
+        items = self.fetch_once_as_rows()
+        streaming_tar.save_rows_as_file(items, target_dir)
 
 
 class PythonProjectContext(object):
@@ -212,9 +223,9 @@ class RayContext(object):
                                                                                                        java_server.timezone)
             res = ray.get(rds.connect_info.remote())
             logging.debug("build ray data server server_id:{} java_server: {} servers:{}".format(server_id,
-                                                                                               str(vars(
-                                                                                                   java_server)),
-                                                                                               str(vars(res))))
+                                                                                                 str(vars(
+                                                                                                     java_server)),
+                                                                                                 str(vars(res))))
             buffer.append(res)
         return buffer
 
@@ -283,8 +294,17 @@ class RayContext(object):
             for row in RayContext.fetch_once_as_rows(shard):
                 yield row
 
+    def fetch_as_dir(self, target_dir):
+        if len(self.data_servers()) > 1:
+            raise Exception("Please make sure you have only one partition on Java/Spark Side")
+        items = self.collect()
+        streaming_tar.save_rows_as_file(items, target_dir)
+
+    def build_result(self, items, block_size=1024):
+        self.python_context.build_result(items, block_size)
+
     @staticmethod
-    def fetch_as_file(context_id, data_servers, file_ref, batch_size):
+    def fetch_as_repeatable_file(context_id, data_servers, file_ref, batch_size):
         import pyarrow as pa
 
         def inner_fetch():
@@ -324,8 +344,9 @@ class RayContext(object):
     def collect_as_file(self, batch_size):
         data_servers = self.data_servers()
         python_context = self.python_context
-        return RayContext.fetch_as_file(python_context.context_id, data_servers, python_context.data_mmap_file_ref,
-                                        batch_size)
+        return RayContext.fetch_as_repeatable_file(python_context.context_id, data_servers,
+                                                   python_context.data_mmap_file_ref,
+                                                   batch_size)
 
     @staticmethod
     def collect_from(servers):
