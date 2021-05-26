@@ -303,6 +303,9 @@ class RayContext(object):
     def build_result(self, items, block_size=1024):
         self.python_context.build_result(items, block_size)
 
+    def build_result_from_dir(self, target_path):
+        self.python_context.build_result_from_dir(target_path)
+
     @staticmethod
     def fetch_as_repeatable_file(context_id, data_servers, file_ref, batch_size):
         import pyarrow as pa
