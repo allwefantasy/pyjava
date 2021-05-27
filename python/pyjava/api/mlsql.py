@@ -316,7 +316,7 @@ class RayContext(object):
     def parse_servers(host_ports):
         hosts = host_ports.split(",")
         hosts = [item.split(":") for item in hosts]
-        return [DataServer(item[0], item[1], "") for item in hosts]
+        return [DataServer(item[0], int(item[1]), "") for item in hosts]
 
     @staticmethod
     def fetch_as_repeatable_file(context_id, data_servers, file_ref, batch_size):
