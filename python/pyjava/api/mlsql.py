@@ -199,6 +199,9 @@ class RayContext(object):
     def data_servers(self):
         return self.servers
 
+    def conf(self):
+        return self.python_context.conf
+
     def data_servers_in_ray(self):
         import ray
         from pyjava.rayfix import RayWrapper
@@ -294,14 +297,26 @@ class RayContext(object):
             for row in RayContext.fetch_once_as_rows(shard):
                 yield row
 
-    def fetch_as_dir(self, target_dir):
-        if len(self.data_servers()) > 1:
+    def fetch_as_dir(self, target_dir, servers=None):
+        if not servers:
+            servers = self.data_servers()
+        if len(servers) > 1:
             raise Exception("Please make sure you have only one partition on Java/Spark Side")
-        items = self.collect()
+
+        items = RayContext.collect_from(servers)
         streaming_tar.save_rows_as_file(items, target_dir)
 
     def build_result(self, items, block_size=1024):
         self.python_context.build_result(items, block_size)
+
+    def build_result_from_dir(self, target_path):
+        self.python_context.build_result_from_dir(target_path)
+
+    @staticmethod
+    def parse_servers(host_ports):
+        hosts = host_ports.split(",")
+        hosts = [item.split(":") for item in hosts]
+        return [DataServer(item[0], int(item[1]), "") for item in hosts]
 
     @staticmethod
     def fetch_as_repeatable_file(context_id, data_servers, file_ref, batch_size):
