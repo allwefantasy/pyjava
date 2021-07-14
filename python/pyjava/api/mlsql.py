@@ -191,10 +191,11 @@ class RayContext(object):
         self.is_dev = utils.is_dev()
         self.is_in_mlsql = True
         self.mock_data = []
-        for item in self.python_context.fetch_once_as_rows():
-            self.server_ids_in_ray.append(str(uuid.uuid4()))
-            self.servers.append(DataServer(
-                item["host"], int(item["port"]), item["timezone"]))
+        if "directData" not in python_context.conf:
+            for item in self.python_context.fetch_once_as_rows():
+                self.server_ids_in_ray.append(str(uuid.uuid4()))
+                self.servers.append(DataServer(
+                    item["host"], int(item["port"]), item["timezone"]))
 
     def data_servers(self):
         return self.servers
