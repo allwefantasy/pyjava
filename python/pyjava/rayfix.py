@@ -12,7 +12,7 @@ def last(func):
 class RayWrapper:
 
     def __init__(self):
-        self.ray_version = StrictVersion(ray.__version__)
+        self.ray_version = "2.0.0" if "dev" in ray.__version__ else StrictVersion(ray.__version__)
         self.ray_instance = ray
 
     def __getattr__(self, attr):
