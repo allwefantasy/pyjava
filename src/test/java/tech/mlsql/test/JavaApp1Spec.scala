@@ -18,7 +18,7 @@ import scala.collection.JavaConverters._
 class JavaApp1Spec extends FunSuite
   with BeforeAndAfterAll {
 
-  def condaEnv = "source /Users/allwefantasy/opt/anaconda3/bin/activate ray1.3.0"
+  def condaEnv = "source /Users/allwefantasy/opt/anaconda3/bin/activate ray-dev"
 
   test("normal java application") {
     val envs = new util.HashMap[String, String]()
@@ -41,7 +41,7 @@ class JavaApp1Spec extends FunSuite
         """
           |import ray
           |from pyjava.api.mlsql import RayContext
-          |ray_context = RayContext.connect(globals(), context.conf["rayAddress"])
+          |ray_context = RayContext.connect(globals(), context.conf["rayAddress"],namespace="default")
           |udfMaster = ray.get_actor("model_predict")
           |worker = ray.get(udfMaster.get.remote())
           |
