@@ -182,6 +182,7 @@ class PythonProjectContext(object):
 
 class RayContext(object):
     cache = {}
+    conn_cache = {}
 
     def __init__(self, python_context):
         self.python_context = python_context
@@ -252,8 +253,13 @@ class RayContext(object):
         if url is not None:
             from pyjava.rayfix import RayWrapper
             ray = RayWrapper()
-            ray.shutdown()
-            ray.init(url, **kwargs)
+            is_udf_client = context.conf.get("UDF_CLIENT")
+            if is_udf_client is None:
+                ray.shutdown()
+                ray.init(url, **kwargs)
+            if is_udf_client and url not in RayContext.conn_cache:
+                ray.init(url, **kwargs)
+                RayContext.conn_cache[url] = 1
         return context.rayContext
 
     def setup(self, func_for_row, func_for_rows=None):

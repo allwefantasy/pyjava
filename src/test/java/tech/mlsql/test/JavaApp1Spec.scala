@@ -43,7 +43,7 @@ class JavaApp1Spec extends FunSuite
           |from pyjava.api.mlsql import RayContext
           |ray_context = RayContext.connect(globals(), context.conf["rayAddress"],namespace="default")
           |udfMaster = ray.get_actor("model_predict")
-          |worker = ray.get(udfMaster.get.remote())
+          |[index,worker] = ray.get(udfMaster.get.remote())
           |
           |input = [row["value"] for row in context.fetch_once_as_rows()]
           |try:
@@ -52,7 +52,7 @@ class JavaApp1Spec extends FunSuite
           |    res=[]
           |    print(inst)
           |
-          |udfMaster.give_back.remote(worker)
+          |udfMaster.give_back.remote(index)
           |ray_context.build_result([res])
         """.stripMargin, envs, "python", "3.6")))), sourceSchema,
       "GMT", runnerConf
