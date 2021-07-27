@@ -60,6 +60,7 @@ try:
         url='https://github.com/allwefantasy/pyjava',
         packages=['pyjava',
                   'pyjava.api',
+                  'pyjava.udf',
                   'pyjava.datatype',
                   'pyjava.storage',
                   'pyjava.cache'],
