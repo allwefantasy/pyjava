@@ -29,7 +29,7 @@ class UDFMaster(object):
         self._idle_actors.append(v)
 
     def shutdown(self) -> NoReturn:
-        [ray.kill(worker) for worker in self._idle_actors]
+        [ray.kill(self.actors[index]) for index in self._idle_actors]
 
 
 @ray.remote
