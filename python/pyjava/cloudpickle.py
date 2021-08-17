@@ -62,8 +62,10 @@ import weakref
 # communication speed over compatibility:
 DEFAULT_PROTOCOL = pickle.HIGHEST_PROTOCOL
 
+minor_info = sys.version_info[1]
+major_info = sys.version_info[0]
 
-if sys.version_info[0] < 3:  # pragma: no branch
+if major_info < 3:  # pragma: no branch
     from pickle import Pickler
     try:
         from cStringIO import StringIO
@@ -130,23 +132,43 @@ def _make_cell_set_template_code():
             (),
         )
     else:
-        return types.CodeType(
-            co.co_argcount,
-            co.co_kwonlyargcount,
-            co.co_nlocals,
-            co.co_stacksize,
-            co.co_flags,
-            co.co_code,
-            co.co_consts,
-            co.co_names,
-            co.co_varnames,
-            co.co_filename,
-            co.co_name,
-            co.co_firstlineno,
-            co.co_lnotab,
-            co.co_cellvars,  # this is the trickery
-            (),
-        )
+        if minor_info >= 8:  # if the version of python is after 3.8
+            return types.CodeType(
+                co.co_argcount,
+                co.co_posonlyargcount, # in py 3.8, posonlyargcount is an additional arg when creating a code object
+                co.co_kwonlyargcount,
+                co.co_nlocals,
+                co.co_stacksize,
+                co.co_flags,
+                co.co_code,
+                co.co_consts,
+                co.co_names,
+                co.co_varnames,
+                co.co_filename,
+                co.co_name,
+                co.co_firstlineno,
+                co.co_lnotab,
+                co.co_cellvars,
+                (),
+            )
+        else:
+            return types.CodeType(
+                co.co_argcount,
+                co.co_kwonlyargcount,
+                co.co_nlocals,
+                co.co_stacksize,
+                co.co_flags,
+                co.co_code,
+                co.co_consts,
+                co.co_names,
+                co.co_varnames,
+                co.co_filename,
+                co.co_name,
+                co.co_firstlineno,
+                co.co_lnotab,
+                co.co_cellvars,  # this is the trickery
+                (),
+            )
 
 
 _cell_set_template_code = _make_cell_set_template_code()
