@@ -43,7 +43,8 @@ class LogClient(object):
                 os.dup(self.conn.fileno()), "rb", buffer_size)
             self.outfile = os.fdopen(
                 os.dup(self.conn.fileno()), "wb", buffer_size)
-
+        else:
+          self.log_host = None
     def log_to_driver(self, msg):
         if not self.log_host:
             print(msg)
