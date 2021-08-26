@@ -8,6 +8,7 @@ import pandas as pd
 import sys
 
 import pyjava.utils as utils
+import requests
 from pyjava.serializers import ArrowStreamSerializer
 from pyjava.serializers import read_int
 from pyjava.utils import utf8_deserializer
@@ -29,33 +30,27 @@ class DataServer(object):
 class LogClient(object):
     def __init__(self, conf):
         self.conf = conf
-        if 'spark.mlsql.log.driver.host' in self.conf:
-            self.log_host = self.conf['spark.mlsql.log.driver.host']
-            self.log_port = self.conf['spark.mlsql.log.driver.port']
+        if 'spark.mlsql.log.driver.url' in self.conf:
+            self.url = self.conf['spark.mlsql.log.driver.url']
             self.log_user = self.conf['PY_EXECUTE_USER']
             self.log_token = self.conf['spark.mlsql.log.driver.token']
             self.log_group_id = self.conf['groupId']
-            import socket
-            self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.conn.connect((self.log_host, int(self.log_port)))
-            buffer_size = int(os.environ.get("SPARK_BUFFER_SIZE", 256))
-            self.infile = os.fdopen(
-                os.dup(self.conn.fileno()), "rb", buffer_size)
-            self.outfile = os.fdopen(
-                os.dup(self.conn.fileno()), "wb", buffer_size)
 
     def log_to_driver(self, msg):
-        if not self.log_host:
-            print(msg)
+        if 'spark.mlsql.log.driver.url' not in self.conf:
+            if self.conf['PY_EXECUTE_USER'] and self.conf['groupId']:
+                logging.info("[owner] [{}] [groupId] [{}] __MMMMMM__ {}".format(self.conf['PY_EXECUTE_USER'],
+                                                                                self.conf['groupId'], msg))
+            else:
+                logging.info(msg)
             return
-        from pyjava.serializers import write_bytes_with_length
         import json
         resp = json.dumps(
             {"sendLog": {
                 "token": self.log_token,
-                "logLine": "[owner] [{}] [groupId] [{}] {}".format(self.log_user, self.log_group_id, msg)
+                "logLine": "[owner] [{}] [groupId] [{}] __MMMMMM__ {}".format(self.log_user, self.log_group_id, msg)
             }}, ensure_ascii=False)
-        write_bytes_with_length(resp, self.outfile)
+        requests.post(self.url, data=resp, headers={'content-type': 'application/x-www-form-urlencoded;charset=UTF-8'})
 
     def close(self):
         if hasattr(self, "conn"):
