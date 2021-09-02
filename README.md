@@ -55,14 +55,14 @@ Build for Spark 3.1.1:
 
 ```
 mlsql_plugin_tool spark311
-mvn clean install -DskipTests -Pdisable-java8-doclint -Prelease-sign-artifactsmvn
+mvn clean install -DskipTests -Pdisable-java8-doclint -Prelease-sign-artifacts
 ```
 
 Build For Spark 2.4.3
 
 ```
 mlsql_plugin_tool spark243
-mvn clean install -DskipTests -Pdisable-java8-doclint -Prelease-sign-artifactsmvn
+mvn clean install -DskipTests -Pdisable-java8-doclint -Prelease-sign-artifacts
 ```
 
 
