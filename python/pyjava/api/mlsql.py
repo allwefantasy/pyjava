@@ -1,8 +1,9 @@
 import logging
 import os
 import socket
-import time
 import uuid
+from urllib.parse import quote
+import json
 
 import pandas as pd
 import sys
@@ -44,13 +45,12 @@ class LogClient(object):
             else:
                 logging.info(msg)
             return
-        import json
         resp = json.dumps(
             {"sendLog": {
                 "token": self.log_token,
                 "logLine": "[owner] [{}] [groupId] [{}] __MMMMMM__ {}".format(self.log_user, self.log_group_id, msg)
             }}, ensure_ascii=False)
-        requests.post(self.url, data=resp, headers={'content-type': 'application/x-www-form-urlencoded;charset=UTF-8'})
+        requests.post(self.url, data=resp, headers={'Content-Type': 'application/json;charset=UTF-8'})
 
     def close(self):
         if hasattr(self, "conn"):
