@@ -5,10 +5,12 @@ import os
 
 class Utils(object):
     @staticmethod
-    def save() -> str:
+    def show_plt() -> str:
         import base64
         import uuid
         import matplotlib.pyplot as plt
-        plt.savefig(os.path.join(tempfile.gettempdir(), str(uuid.uuid4()) + ".png"))
-        with open("/tmp/a.png", mode='rb') as file:
-            fileContent = base64.b64encode(file.read()).decode()
+        img_path = os.path.join(tempfile.gettempdir(), str(uuid.uuid4()) + ".png")
+        plt.savefig(img_path)
+        with open(img_path, mode='rb') as file:
+            file_content = base64.b64encode(file.read()).decode()
+        return file_content
