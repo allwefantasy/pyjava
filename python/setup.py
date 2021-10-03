@@ -76,7 +76,7 @@ try:
         extras_require={
             'pyjava': [
                 'pandas>=%s' % _minimum_pandas_version,
-                'pyarrow>=%s' % _minimum_pyarrow_version,
+                'pyarrow>=%s' % _minimum_pyarrow_version
             ]
         },
         classifiers=[
