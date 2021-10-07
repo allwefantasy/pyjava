@@ -46,9 +46,6 @@ run sdist.
       python setup.py sdist
       pip install dist/*.tar.gz"""
 
-_minimum_pandas_version = "0.23.2"
-_minimum_pyarrow_version = "0.12.1"
-
 try:
     setup(
         name='pyjava',
@@ -71,13 +68,8 @@ try:
         package_data={
             'pyjava.sbin': []},
         license='http://www.apache.org/licenses/LICENSE-2.0',
-        install_requires=['py4j==0.10.8.1'],
         setup_requires=['pypandoc'],
         extras_require={
-            'pyjava': [
-                'pandas>=%s' % _minimum_pandas_version,
-                'pyarrow>=%s' % _minimum_pyarrow_version
-            ]
         },
         classifiers=[
             'Development Status :: 5 - Production/Stable',

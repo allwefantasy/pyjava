@@ -26,7 +26,12 @@ class RayWrapper:
 
     def init(self, address, **kwargs):
         logging.debug(f"address {address} {kwargs}")
-        if self.ray_version >= StrictVersion('1.0.0'):
+        if self.ray_version >= StrictVersion('1.4.0'):
+            if "namespace" in kwargs.keys():
+                ray.util.connect(conn_str=address, **kwargs)
+            else:
+                ray.util.connect(conn_str=address, namespace="default", **kwargs)
+        elif self.ray_version >= StrictVersion('1.0.0'):
             logging.debug(f"try to connect to ray {address}")
             ray.util.connect(conn_str=address, **kwargs)
         elif self.ray_version == StrictVersion('0.8.7'):

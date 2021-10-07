@@ -245,7 +245,14 @@ class RayContext(object):
         else:
             raise Exception("context is not set")
 
-        if url is not None:
+        if url == "local":
+            from pyjava.rayfix import RayWrapper
+            ray = RayWrapper()
+            if not ray.ray_instance.is_initialized:
+                ray.ray_instance.shutdown()
+            ray.ray_instance.init()
+
+        elif url is not None:
             from pyjava.rayfix import RayWrapper
             ray = RayWrapper()
             is_udf_client = context.conf.get("UDF_CLIENT")
@@ -255,6 +262,7 @@ class RayContext(object):
             if is_udf_client and url not in RayContext.conn_cache:
                 ray.init(url, **kwargs)
                 RayContext.conn_cache[url] = 1
+
         return context.rayContext
 
     def setup(self, func_for_row, func_for_rows=None):

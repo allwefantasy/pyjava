@@ -1,15 +1,11 @@
-from __future__ import absolute_import
-
 import ray
-from pyjava.api.mlsql import PythonContext
-from pyjava.api import is_in_mlsql
+
+ray.init()
 
 
-ray.shutdown()
+@ray.remote
+def slow_function():
+    return 1
 
-data = [{'id': 9, 'content': '1', 'label': 0.0}]
-wow = PythonContext.build_chunk_result(data, 1024)
-# items = ([df[name] for name in df] for df in wow)
 
-for item in wow:
-    print(item)
+print(ray.get(slow_function.remote()))
