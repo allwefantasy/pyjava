@@ -1,29 +1,45 @@
 #!/usr/bin/env bash
 
+set -euo pipefail
+
 version=${1:-0.3.3}
 
-quoteVersion=$(cat python/pyjava/version.py|grep "__version__" |awk -F'=' '{print $2}'| xargs )
+ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+MVN="${MVN:-mvn}"
 
-if [[ "${version}" != "${quoteVersion}" ]];then
-   echo "version[${quoteVersion}] in python/pyjava/version.py is not match with version[${version}] you specified"
-   exit 1
+cd "${ROOT_DIR}"
+
+quoteVersion=$(grep "__version__" python/pyjava/version.py | awk -F'=' '{print $2}' | xargs)
+
+if [[ "${version}" != "${quoteVersion}" ]]; then
+  echo "version[${quoteVersion}] in python/pyjava/version.py does not match version[${version}] you specified"
+  exit 1
 fi
 
-if [[ ! -d '.repo' ]];then
-   echo "Make sure this script executed in root directory of pyjava"
-   exit 1
+if [[ ! -d ".repo" ]]; then
+  echo "Make sure this script is executed in the root directory of pyjava"
+  exit 1
 fi
 
-echo "deploy pyjava jar based on spark243...."
-mlsql_plugin_tool spark243
-mvn clean deploy -DskipTests -Pdisable-java8-doclint -Prelease-sign-artifacts
+run_publish() {
+  local label="$1"
+  shift
 
-echo "deploy pyjava jar based on spark311...."
-mlsql_plugin_tool spark311
-mvn clean deploy -DskipTests -Pdisable-java8-doclint -Prelease-sign-artifacts
+  echo "==> Publishing ${label}"
+  "${MVN}" clean deploy \
+    -DskipTests=true \
+    -Pdisable-java8-doclint \
+    -Prelease-sign-artifacts \
+    "$@"
+}
 
-echo "deploy pyjava pip...."
+run_publish "Spark 2.4 / Scala 2.11.8 artifacts (*_2.11)" -Pscala-2.11
+run_publish "Spark 4.1 / default Scala artifacts (*_2.13)"
+
+echo "==> Publishing pyjava pip package"
 cd python
 rm -rf dist
-pip uninstall -y pyjava && python setup.py sdist bdist_wheel && cd ./dist/ && pip install pyjava-${version}-py3-none-any.whl && cd -
+pip uninstall -y pyjava
+python setup.py sdist bdist_wheel
+pip install "dist/pyjava-${version}-py3-none-any.whl"
 twine upload dist/*

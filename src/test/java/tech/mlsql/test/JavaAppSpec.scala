@@ -4,9 +4,10 @@ import java.util
 
 import org.apache.spark.{TaskContext, WowRowEncoder}
 import org.apache.spark.sql.Row
-import org.apache.spark.sql.catalyst.encoders.RowEncoder
 import org.apache.spark.sql.types.{StringType, StructField, StructType}
-import org.scalatest.{BeforeAndAfterAll, FunSuite}
+import org.scalatest.{BeforeAndAfterAll, DoNotDiscover}
+import org.scalatest.funsuite.AnyFunSuite
+import streaming.core.NotToRunTag
 import tech.mlsql.arrow.python.iapp.{AppContextImpl, JavaContext}
 import tech.mlsql.arrow.python.runner.{ArrowPythonRunner, ChainedPythonFunctions, PythonConf, PythonFunction}
 import tech.mlsql.common.utils.lang.sc.ScalaMethodMacros.str
@@ -16,12 +17,13 @@ import scala.collection.JavaConverters._
 /**
  * 2019-08-15 WilliamZhu(allwefantasy@gmail.com)
  */
-class JavaAppSpec extends FunSuite
+@DoNotDiscover
+class JavaAppSpec extends AnyFunSuite
   with BeforeAndAfterAll {
 
   def condaEnv = "source /Users/allwefantasy/opt/anaconda3/bin/activate dev"
 
-  test("normal java application") {
+  test("normal java application", NotToRunTag) {
     val envs = new util.HashMap[String, String]()
     envs.put(str(PythonConf.PYTHON_ENV), s"${condaEnv} && export ARROW_PRE_0_15_IPC_FORMAT=1 ")
     val sourceSchema = StructType(Seq(StructField("value", StringType)))

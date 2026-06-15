@@ -9,3 +9,4 @@ __pycache__
 spark-warehouse
 
 *.iml
+.flattened-pom.xml

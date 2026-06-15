@@ -3,17 +3,18 @@
  */
 package org.apache.spark
 import org.apache.spark.sql.Row
+import org.apache.spark.sql.catalyst.CatalystTypeConverters
 import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.encoders.RowEncoder
 import org.apache.spark.sql.types.StructType
 
 object WowRowEncoder {
   def toRow(schema: StructType) = {
-    RowEncoder.apply(schema).resolveAndBind().createDeserializer()
-
+    val converter = CatalystTypeConverters.createToScalaConverter(schema)
+    (row: InternalRow) => converter(row).asInstanceOf[Row]
   }
 
   def fromRow(schema: StructType) = {
-    RowEncoder.apply(schema).resolveAndBind().createSerializer()
+    val converter = CatalystTypeConverters.createToCatalystConverter(schema)
+    (row: Row) => converter(row).asInstanceOf[InternalRow]
   }
 }

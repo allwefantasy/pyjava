@@ -3,7 +3,9 @@ package tech.mlsql.test
 import org.apache.spark.WowRowEncoder
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.types.{LongType, StringType, StructField, StructType}
-import org.scalatest.{BeforeAndAfterAll, FunSuite}
+import org.scalatest.{BeforeAndAfterAll, DoNotDiscover}
+import org.scalatest.funsuite.AnyFunSuite
+import streaming.core.NotToRunTag
 import tech.mlsql.arrow.python.iapp.{AppContextImpl, JavaContext}
 import tech.mlsql.arrow.python.runner.SparkSocketRunner
 import tech.mlsql.common.utils.network.NetUtils
@@ -11,9 +13,10 @@ import tech.mlsql.common.utils.network.NetUtils
 /**
  * 24/12/2019 WilliamZhu(allwefantasy@gmail.com)
  */
-class JavaArrowServer extends FunSuite with BeforeAndAfterAll {
+@DoNotDiscover
+class JavaArrowServer extends AnyFunSuite with BeforeAndAfterAll {
 
-  test("test java arrow server") {
+  test("test java arrow server", NotToRunTag) {
     val socketRunner = new SparkSocketRunner("wow", NetUtils.getHost, "Asia/Harbin")
 
     val dataSchema = StructType(Seq(StructField("value", StringType)))
@@ -29,7 +32,7 @@ class JavaArrowServer extends FunSuite with BeforeAndAfterAll {
     Thread.currentThread().join()
   }
 
-  test("test read python arrow server") {
+  test("test read python arrow server", NotToRunTag) {
     val enconder = WowRowEncoder.toRow(StructType(Seq(StructField("a", LongType),StructField("b", LongType))))
     val socketRunner = new SparkSocketRunner("wow", NetUtils.getHost, "Asia/Harbin")
     val javaConext = new JavaContext

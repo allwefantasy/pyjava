@@ -3,14 +3,17 @@ package tech.mlsql.test
 import java.util
 
 import org.apache.spark.sql.{Row, SparkSession, SparkUtils}
-import org.scalatest.{BeforeAndAfterAll, FunSuite}
+import org.scalatest.{BeforeAndAfterAll, DoNotDiscover}
+import org.scalatest.funsuite.AnyFunSuite
 import tech.mlsql.common.utils.log.Logging
 import tech.mlsql.test.function.SparkFunctions.MockData
+import streaming.core.NotToRunTag
 
 /**
  * 2019-08-14 WilliamZhu(allwefantasy@gmail.com)
  */
-class SparkSpec extends FunSuite with BeforeAndAfterAll with Logging{
+@DoNotDiscover
+class SparkSpec extends AnyFunSuite with BeforeAndAfterAll with Logging{
 
   val rayEnv = new RayEnv
   var spark: SparkSession = null
@@ -18,7 +21,7 @@ class SparkSpec extends FunSuite with BeforeAndAfterAll with Logging{
   def condaEnv = "source /Users/allwefantasy/opt/anaconda3/bin/activate ray1.2"
 
   //spark.executor.heartbeatInterval
-  test("test python ray connect") {
+  test("test python ray connect", NotToRunTag) {
     val session = spark
     import session.implicits._
     val timezoneId = session.sessionState.conf.sessionLocalTimeZone
