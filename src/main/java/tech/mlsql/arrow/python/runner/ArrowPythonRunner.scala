@@ -25,6 +25,9 @@ class ArrowPythonRunner(
   extends BasePythonRunner[Iterator[InternalRow], ColumnarBatch](
     funcs, conf) {
 
+  private val maxRecordsPerBatch = conf.getOrElse("python.arrow.maxRecordsPerBatch", "10000").toInt
+  require(maxRecordsPerBatch > 0, "python.arrow.maxRecordsPerBatch must be positive")
+
   protected override def newWriterThread(
                                           worker: Socket,
                                           inputIterator: Iterator[Iterator[InternalRow]],
@@ -61,14 +64,22 @@ class ArrowPythonRunner(
 
           while (inputIterator.hasNext) {
             val nextBatch = inputIterator.next()
-
+            var rowsInBatch = 0
             while (nextBatch.hasNext) {
               arrowWriter.write(nextBatch.next())
+              rowsInBatch += 1
+              if (rowsInBatch == maxRecordsPerBatch) {
+                arrowWriter.finish()
+                writer.writeBatch()
+                arrowWriter.reset()
+                rowsInBatch = 0
+              }
             }
-
-            arrowWriter.finish()
-            writer.writeBatch()
-            arrowWriter.reset()
+            if (rowsInBatch > 0) {
+              arrowWriter.finish()
+              writer.writeBatch()
+              arrowWriter.reset()
+            }
           }
           // end writes footer to the output stream and doesn't clean any resources.
           // It could throw exception if the output stream is closed, so it should be
@@ -108,15 +119,21 @@ class ArrowPythonRunner(
       private var root: VectorSchemaRoot = _
       private var schema: StructType = _
       private var vectors: Array[ColumnVector] = _
-      context.readerRegister(() => {})(reader, allocator)
+      private val resourcesClosed = new AtomicBoolean(false)
+      private def closeResources(): Unit = {
+        if (resourcesClosed.compareAndSet(false, true)) {
+          try { if (reader != null) reader.close(false) }
+          finally { allocator.close() }
+        }
+      }
+      // Capture the mutable reader by callback, rather than its initial null value.
+      context.readerRegister(() => closeResources())(null, null)
 
       private var batchLoaded = true
 
       protected override def read(): ColumnarBatch = {
-        if (writerThread.exception.isDefined) {
-          throw writerThread.exception.get
-        }
         try {
+          if (writerThread.exception.isDefined) throw writerThread.exception.get
           if (reader != null && batchLoaded) {
             batchLoaded = reader.loadNextBatch()
             if (batchLoaded) {
@@ -124,8 +141,7 @@ class ArrowPythonRunner(
               batch.setNumRows(root.getRowCount)
               batch
             } else {
-              reader.close(false)
-              allocator.close()
+              closeResources()
               // Reach end of stream. Call `read()` again to read control data.
               read()
             }
@@ -143,6 +159,7 @@ class ArrowPythonRunner(
                 } catch {
                   case e: IOException if (e.getMessage.contains("Missing schema") || e.getMessage.contains("Expected schema but header was")) =>
                     logInfo("Arrow read schema fail", e)
+                    if (reader != null) reader.close(false)
                     reader = null
                     read()
                 }
@@ -153,15 +170,20 @@ class ArrowPythonRunner(
               case SpecialLengths.PYTHON_EXCEPTION_THROWN =>
                 throw handlePythonException()
 
-              case SpecialLengths.PYTHON_EXCEPTION_THROWN =>
-                throw handlePythonException()
-
               case SpecialLengths.END_OF_DATA_SECTION =>
                 handleEndOfDataSection()
+                closeResources()
                 null
+
+              case flag => throw new IOException(s"Invalid Python worker message: $flag")
             }
           }
-        } catch handleException
+        } catch {
+          case scala.util.control.NonFatal(e) =>
+            try closeResources()
+            catch { case scala.util.control.NonFatal(cleanup) => e.addSuppressed(cleanup) }
+            handleException(e)
+        }
       }
     }
   }

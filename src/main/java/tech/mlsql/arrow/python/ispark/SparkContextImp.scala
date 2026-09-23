@@ -11,7 +11,7 @@ import org.apache.spark.util.TaskCompletionListener
 import tech.mlsql.arrow.context.CommonTaskContext
 import tech.mlsql.arrow.python.PythonWorkerFactory
 import tech.mlsql.arrow.python.runner.ArrowPythonRunner
-import tech.mlsql.common.utils.log.Logging
+import tech.mlsql.arrow.log.Logging
 
 /**
  * 2019-08-15 WilliamZhu(allwefantasy@gmail.com)
@@ -26,9 +26,9 @@ class SparkContextImp(context: TaskContext, _arrowPythonRunner: ArrowPythonRunne
         override def onTaskCompletion(context: TaskContext): Unit = {
           //writerThread.shutdownOnTaskCompletion()
           callback()
-          if (!reuseWorker || releasedOrClosed.compareAndSet(false, true)) {
+          if (releasedOrClosed.compareAndSet(false, true)) {
             try {
-              worker.close()
+              PythonWorkerFactory.destroyPythonWorker(worker)
             } catch {
               case e: Exception =>
                 logWarning("Failed to close worker socket", e)
@@ -120,6 +120,7 @@ class SparkContextImp(context: TaskContext, _arrowPythonRunner: ArrowPythonRunne
     (reader, allocator) => {
       context.addTaskCompletionListener(new TaskCompletionListener {
         override def onTaskCompletion(context: TaskContext): Unit = {
+          callback()
           if (reader != null) {
             reader.close(false)
           }
@@ -127,7 +128,7 @@ class SparkContextImp(context: TaskContext, _arrowPythonRunner: ArrowPythonRunne
           // 显示内存泄露，此时进行close会抛错，我们需要catch住这个错误。
           // 目前来看，资源应该能够得到释放。大部分情况，我们都能正常消费掉所有数据。
           try {
-            allocator.close()
+            if (allocator != null) allocator.close()
           } catch {
             case e: Exception =>
               logError("allocator.close()", e)

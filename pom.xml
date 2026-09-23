@@ -40,6 +40,7 @@
     </issueManagement>
 
     <properties>
+        <pyjava.build.directory>target</pyjava.build.directory>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <manifold.version>2021.1.12</manifold.version>
@@ -55,7 +56,7 @@
         <httpclient.version>4.5.3</httpclient.version>
         <scope>provided</scope>
         <hadoop-client-version>3.4.2</hadoop-client-version>
-        <common-utils-version>1.0.0</common-utils-version>
+        <os-lib.version>0.7.8</os-lib.version>
         <serviceframework.version>2.0.6</serviceframework.version>
         <scalatest.version>3.2.19</scalatest.version>
         <test.jvm.args></test.jvm.args>
@@ -73,7 +74,7 @@
                 <spark.bigversion>2.4</spark.bigversion>
                 <jackson.version>2.10.1</jackson.version>
                 <hadoop-client-version>2.6.5</hadoop-client-version>
-                <common-utils-version>0.3.9.2</common-utils-version>
+                <os-lib.version>0.2.9</os-lib.version>
                 <scalatest.version>3.2.3</scalatest.version>
             </properties>
         </profile>
@@ -137,9 +138,9 @@
             <version>${scala.version}</version>
         </dependency>
         <dependency>
-            <groupId>tech.mlsql</groupId>
-            <artifactId>common-utils_${scala.binary.version}</artifactId>
-            <version>${common-utils-version}</version>
+            <groupId>com.lihaoyi</groupId>
+            <artifactId>os-lib_${scala.binary.version}</artifactId>
+            <version>${os-lib.version}</version>
         </dependency>
         <dependency>
             <groupId>org.scalactic</groupId>
@@ -271,6 +272,7 @@
 
 
     <build>
+        <directory>${pyjava.build.directory}</directory>
         <resources>
             <resource>
                 <directory>src/main/resources</directory>

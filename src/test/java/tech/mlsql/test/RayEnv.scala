@@ -24,6 +24,7 @@
 package tech.mlsql.test
 
 import java.io.File
+import java.net.InetAddress
 import java.nio.charset.StandardCharsets
 import java.util.TimeZone
 import java.util.regex.Pattern
@@ -33,13 +34,9 @@ import org.apache.spark.{TaskContext, WowRowEncoder}
 import org.apache.spark.rdd.RDD
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.{DataFrame, Row}
-import os.CommandResult
+import tech.mlsql.arrow.log.Logging
 import tech.mlsql.arrow.python.ispark.SparkContextImp
 import tech.mlsql.arrow.python.runner.SparkSocketRunner
-import tech.mlsql.common.utils.log.Logging
-import tech.mlsql.common.utils.net.NetTool
-import tech.mlsql.common.utils.network.NetUtils
-import tech.mlsql.common.utils.shell.ShellCommand
 import tech.mlsql.test.RayEnv.ServerInfo
 
 class RayEnv extends Logging with Serializable {
@@ -127,20 +124,21 @@ class RayEnv extends Logging with Serializable {
   def startDataServer(df: DataFrame): Unit = {
     val dataSchema = df.schema
     dataServers = df.repartition(1).rdd.mapPartitions(iter => {
-      val socketServer = new SparkSocketRunner("serve-runner-for-ut", NetTool.localHostName(), TimeZone.getDefault.getID)
+      val socketServer = new SparkSocketRunner("serve-runner-for-ut", InetAddress.getLocalHost.getHostAddress, TimeZone.getDefault.getID)
       val commonTaskContext = new SparkContextImp(TaskContext.get(), null)
       val rab = WowRowEncoder.fromRow(dataSchema) //RowEncoder.apply(dataSchema).resolveAndBind()
       val newIter = iter.map(row => {
         rab(row)
       })
-      val Array(_server, _host: String, _port: Int) = socketServer.serveToStreamWithArrow(newIter, dataSchema, 10, commonTaskContext)
+      val Array(_server, _host: String, _port: Int) = socketServer.serveToStreamWithArrow(newIter, dataSchema, 10, commonTaskContext,
+        Map("python.socket.detached" -> "true"))
       Seq(ServerInfo(_host, _port, TimeZone.getDefault.getID)).iterator
     }).collect().toSeq
   }
 
   def collectResult(rdd: RDD[Row]): RDD[InternalRow] = {
     rdd.flatMap { row =>
-      val socketRunner = new SparkSocketRunner("read-runner-for-ut", NetUtils.getHost, TimeZone.getDefault.getID)
+      val socketRunner = new SparkSocketRunner("read-runner-for-ut", InetAddress.getLocalHost.getHostName, TimeZone.getDefault.getID)
       val commonTaskContext = new SparkContextImp(TaskContext.get(), null)
       val pythonWorkerHost = row.getAs[String]("host")
       val pythonWorkerPort = row.getAs[Long]("port").toInt
@@ -151,7 +149,7 @@ class RayEnv extends Logging with Serializable {
   }
 
 
-  private def runWithProfile(envName: String, command: String): CommandResult = {
+  private def runWithProfile(envName: String, command: String): os.CommandResult = {
     val tmpShellFile = File.createTempFile("shell", ".sh")
     val setupEnv = if (envName.trim.startsWith("conda") || envName.trim.startsWith("source")) envName else s"""conda activate ${envName}"""
     try {
@@ -165,7 +163,7 @@ class RayEnv extends Logging with Serializable {
            |${setupEnv}
            |${command}
            |""".stripMargin, tmpShellFile, StandardCharsets.UTF_8)
-      val cmdResult = ShellCommand.execCmdV2("/bin/bash", tmpShellFile.getAbsolutePath)
+      val cmdResult = os.proc(Seq("/bin/bash", tmpShellFile.getAbsolutePath)).call(stderr = os.Pipe, check = false)
       //      if (cmdResult.exitCode != 0) {
       //        throw new RuntimeException(s"run command failed ${cmdResult.toString()}")
       //      }

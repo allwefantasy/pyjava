@@ -1,7 +1,8 @@
 package tech.mlsql.test
 
+import java.io.File
+
 import tech.mlsql.arrow.python.runner.PythonProjectRunner
-import tech.mlsql.common.utils.path.PathFun
 
 /**
  * 4/3/2020 WilliamZhu(allwefantasy@gmail.com)
@@ -17,7 +18,7 @@ object Main {
     output.foreach(println)
   }
   def getExampleProject(name: String) = {
-    PathFun(getHome).add("examples").add(name).toPath
+    new File(new File(getHome, "examples"), name).getPath
   }
 
   def getHome = {

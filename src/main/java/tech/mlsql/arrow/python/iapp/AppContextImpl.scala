@@ -9,7 +9,7 @@ import org.apache.arrow.vector.ipc.ArrowStreamReader
 import tech.mlsql.arrow.context.CommonTaskContext
 import tech.mlsql.arrow.python.PythonWorkerFactory
 import tech.mlsql.arrow.python.runner.ArrowPythonRunner
-import tech.mlsql.common.utils.log.Logging
+import tech.mlsql.arrow.log.Logging
 
 import scala.collection.mutable.ArrayBuffer
 
@@ -26,9 +26,9 @@ class AppContextImpl(context: JavaContext, _arrowPythonRunner: ArrowPythonRunner
       context.addTaskCompletionListener[Unit] { _ =>
         //writerThread.shutdownOnTaskCompletion()
         callback()
-        if (!reuseWorker || releasedOrClosed.compareAndSet(false, true)) {
+        if (releasedOrClosed.compareAndSet(false, true)) {
           try {
-            worker.close()
+            PythonWorkerFactory.destroyPythonWorker(worker)
           } catch {
             case e: Exception =>
               logWarning("Failed to close worker socket", e)
@@ -113,11 +113,12 @@ class AppContextImpl(context: JavaContext, _arrowPythonRunner: ArrowPythonRunner
   override def readerRegister(callback: () => Unit): (ArrowStreamReader, BufferAllocator) => Unit = {
     (reader, allocator) => {
       context.addTaskCompletionListener[Unit] { _ =>
+        callback()
         if (reader != null) {
           reader.close(false)
         }
         try {
-          allocator.close()
+          if (allocator != null) allocator.close()
         } catch {
           case e: Exception =>
             logError("allocator.close()", e)
@@ -131,10 +132,11 @@ class AppContextImpl(context: JavaContext, _arrowPythonRunner: ArrowPythonRunner
 class JavaContext {
   val buffer = new ArrayBuffer[AppTaskCompletionListener]()
 
-  var _isCompleted = false
+  @volatile var _isCompleted = false
   var _partitionId = UUID.randomUUID().toString
-  var reasonIfKilled: Option[String] = None
-  var getKillReason = reasonIfKilled
+  @volatile var reasonIfKilled: Option[String] = None
+  def getKillReason = reasonIfKilled
+  def getKillReason_=(reason: Option[String]): Unit = { reasonIfKilled = reason }
 
   def isInterrupted = reasonIfKilled.isDefined
 
@@ -174,7 +176,18 @@ class JavaContext {
   }
 
   def close = {
-    buffer.foreach(_.onTaskCompletion(this))
+    markComplete
+    var failure: Throwable = null
+    val listeners = buffer.toList
+    buffer.clear()
+    listeners.foreach { listener =>
+      try listener.onTaskCompletion(this)
+      catch {
+        case scala.util.control.NonFatal(e) =>
+          if (failure == null) failure = e else failure.addSuppressed(e)
+      }
+    }
+    if (failure != null) throw failure
   }
 }
 

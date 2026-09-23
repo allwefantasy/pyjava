@@ -7,7 +7,7 @@ import java.util.concurrent.TimeUnit
 import org.apache.spark.network.util.JavaUtils
 import tech.mlsql.arrow.api.RedirectStreams
 import tech.mlsql.arrow.python.PythonWorkerFactory.Tool.REDIRECT_IMPL
-import tech.mlsql.common.utils.log.Logging
+import tech.mlsql.arrow.log.Logging
 
 import scala.io.Source
 import scala.util.Try

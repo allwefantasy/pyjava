@@ -5,7 +5,7 @@ import java.util
 import org.apache.spark.sql.{Row, SparkSession, SparkUtils}
 import org.scalatest.{BeforeAndAfterAll, DoNotDiscover}
 import org.scalatest.funsuite.AnyFunSuite
-import tech.mlsql.common.utils.log.Logging
+import tech.mlsql.arrow.log.Logging
 import tech.mlsql.test.function.SparkFunctions.MockData
 import streaming.core.NotToRunTag
 

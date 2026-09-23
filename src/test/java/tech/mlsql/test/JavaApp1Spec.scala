@@ -9,8 +9,8 @@ import org.scalatest.{BeforeAndAfterAll, DoNotDiscover}
 import org.scalatest.funsuite.AnyFunSuite
 import streaming.core.NotToRunTag
 import tech.mlsql.arrow.python.iapp.{AppContextImpl, JavaContext}
-import tech.mlsql.arrow.python.runner.{ArrowPythonRunner, ChainedPythonFunctions, PythonConf, PythonFunction}
-import tech.mlsql.common.utils.lang.sc.ScalaMethodMacros.str
+import tech.mlsql.arrow.python.runner.{ArrowPythonRunner, ChainedPythonFunctions, PythonFunction}
+
 
 import scala.collection.JavaConverters._
 
@@ -25,7 +25,7 @@ class JavaApp1Spec extends AnyFunSuite
 
   test("normal java application", NotToRunTag) {
     val envs = new util.HashMap[String, String]()
-    envs.put(str(PythonConf.PYTHON_ENV), s"${condaEnv} && export ARROW_PRE_0_15_IPC_FORMAT=1 ")
+    envs.put("PYTHON_ENV", s"${condaEnv} && export ARROW_PRE_0_15_IPC_FORMAT=1 ")
     val sourceSchema = StructType(Seq(StructField("value", ArrayType(DoubleType))))
 
     val runnerConf = Map(

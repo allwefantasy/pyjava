@@ -104,6 +104,11 @@ class PythonContext(object):
     def output(self):
         return self.output_data
 
+    def barrier(self):
+        """Block until every task in this barrier stage reaches this call."""
+        from pyjava.barrier import BarrierTaskContext
+        BarrierTaskContext.get().barrier()
+
     def __del__(self):
         logging.info("==clean== context")
         if self.log_client is not None:
@@ -268,7 +273,7 @@ class RayContext(object):
 
         return context.rayContext
 
-    def setup(self, func_for_row, func_for_rows=None):
+    def setup(self, func_for_row, func_for_rows=None, func_for_batches=None):
         if self.is_setup:
             raise ValueError("setup can be only invoke once")
         self.is_setup = True
@@ -287,6 +292,11 @@ add comment like: `#%dataMode=data` if you are in notebook.
         rayw = RayWrapper()
 
         if not self.is_in_mlsql:
+            if func_for_batches is not None:
+                def apply_batches(items):
+                    from pyjava.transfer import arrow_batches
+                    return list(func_for_batches(arrow_batches(items)))
+                return ray.get(ray.remote(apply_batches).remote(self.mock_data))
             if func_for_rows is not None:
                 func = ray.remote(func_for_rows)
                 return ray.get(func.remote(self.mock_data))
@@ -304,7 +314,7 @@ add comment like: `#%dataMode=data` if you are in notebook.
             server = rayw.get_actor(server_info.server_id)
             rci = ray.get(server.connect_info.remote())
             buffer.append(rci)
-            server.serve.remote(func_for_row, func_for_rows)
+            server.serve.remote(func_for_row, func_for_rows, func_for_batches)
         items = [vars(server) for server in buffer]
         self.python_context.build_result(items, 1024)
         return buffer
@@ -314,6 +324,10 @@ add comment like: `#%dataMode=data` if you are in notebook.
 
     def map_iter(self, func_for_rows):
         return self.setup(None, func_for_rows)
+
+    def map_batches(self, func_for_batches):
+        """Transform an iterator of Arrow RecordBatches without pandas/row conversion."""
+        return self.setup(None, None, func_for_batches)
 
     def collect(self):
         for shard in self.data_servers():
@@ -349,8 +363,8 @@ add comment like: `#%dataMode=data` if you are in notebook.
             for data_server in data_servers:
                 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
                     out_ser = ArrowStreamSerializer()
+                    buffer_size = utils.configure_transfer_socket(sock)
                     sock.connect((data_server.host, data_server.port))
-                    buffer_size = int(os.environ.get("BUFFER_SIZE", 65536))
                     infile = os.fdopen(os.dup(sock.fileno()), "rb", buffer_size)
                     result = out_ser.load_stream(infile)
                     for batch in result:
@@ -398,18 +412,25 @@ add comment like: `#%dataMode=data` if you are in notebook.
 
     @staticmethod
     def fetch_once_as_rows(data_server):
-        for df in RayContext.fetch_data_from_single_data_server(data_server):
-            for row in df.to_dict('records'):
-                yield row
+        # Converting nullable int64 through pandas would round values above 2**53.
+        from pyjava.transfer import arrow_rows
+        for batch in RayContext.fetch_arrow_batches(data_server):
+            yield from arrow_rows(batch)
+
+    @staticmethod
+    def fetch_arrow_batches(data_server):
+        """Stream typed Arrow batches; the caller must close an abandoned generator."""
+        import pyarrow as pa
+        from pyjava.transfer import StrictArrowInput, positive_env
+        timeout = positive_env("PYJAVA_SOCKET_TIMEOUT_SECONDS", 300)
+        with socket.create_connection((data_server.host, data_server.port), timeout=10) as sock:
+            buffer_size = utils.configure_transfer_socket(sock)
+            sock.settimeout(timeout)
+            with sock.makefile("rb", buffer_size) as infile:
+                with pa.ipc.open_stream(StrictArrowInput(infile)) as reader:
+                    yield from reader
 
     @staticmethod
     def fetch_data_from_single_data_server(data_server):
-        out_ser = ArrowStreamSerializer()
-        import pyarrow as pa
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-            sock.connect((data_server.host, data_server.port))
-            buffer_size = int(os.environ.get("BUFFER_SIZE", 65536))
-            infile = os.fdopen(os.dup(sock.fileno()), "rb", buffer_size)
-            result = out_ser.load_stream(infile)
-            for items in result:
-                yield pa.Table.from_batches([items]).to_pandas()
+        for batch in RayContext.fetch_arrow_batches(data_server):
+            yield batch.to_pandas()

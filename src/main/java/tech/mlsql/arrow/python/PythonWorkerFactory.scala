@@ -1,390 +1,299 @@
 package tech.mlsql.arrow.python
 
-/**
- * 2019-08-14 WilliamZhu(allwefantasy@gmail.com)
- */
-
 import java.io._
-import java.net.{InetAddress, ServerSocket, Socket, SocketException}
-import java.util.Arrays
-import java.util.concurrent.TimeUnit
-import java.util.concurrent.atomic.AtomicLong
+import java.net.{InetAddress, InetSocketAddress, ServerSocket, Socket}
+import java.util.concurrent.{Callable, ExecutionException, FutureTask, TimeUnit, TimeoutException}
 
-import javax.annotation.concurrent.GuardedBy
 import tech.mlsql.arrow.Utils
-import tech.mlsql.arrow.python.runner.PythonConf
-import tech.mlsql.common.utils.lang.sc.ScalaMethodMacros
-import tech.mlsql.common.utils.log.Logging
-
+import tech.mlsql.arrow.log.Logging
 import scala.collection.JavaConverters._
 import scala.collection.mutable
+import scala.util.control.NonFatal
 
+/** Owns Python processes and their single-task-at-a-time sockets. */
 class PythonWorkerFactory(pythonExec: String, envVars: Map[String, String], conf: Map[String, String])
   extends Logging {
-  self =>
-
   import PythonWorkerFactory.Tool._
 
-  // Because forking processes from Java is expensive, we prefer to launch a single Python daemon,
-  // pyspark/daemon.py (by default) and tell it to fork new workers for our tasks. This daemon
-  // currently only works on UNIX-based systems now because it uses signals for child management,
-  // so we can also fall back to launching workers, pyspark/worker.py (by default) directly.
-  private val useDaemon = {
-    val useDaemonEnabled = true
-
-    // This flag is ignored on Windows as it's unable to fork.
-    !System.getProperty("os.name").startsWith("Windows") && useDaemonEnabled
-  }
-
-  // WARN: Both configurations, 'spark.python.daemon.module' and 'spark.python.worker.module' are
-  // for very advanced users and they are experimental. This should be considered
-  // as expert-only option, and shouldn't be used before knowing what it means exactly.
-
-  // This configuration indicates the module to run the daemon to execute its Python workers.
+  private val useDaemon = !System.getProperty("os.name").startsWith("Windows") &&
+    conf.getOrElse(PYTHON_USE_DAEMON, "true").toBoolean
   private val daemonModule = conf.getOrElse(PYTHON_DAEMON_MODULE, "pyjava.daemon")
-
-
-  // This configuration indicates the module to run each Python worker.
   private val workerModule = conf.getOrElse(PYTHON_WORKER_MODULE, "pyjava.worker")
+  private val connectTimeout = positive(PYTHON_CONNECT_TIMEOUT, 10000)
+  private val startupTimeout = positive(PYTHON_STARTUP_TIMEOUT, 10000)
+  private val readTimeout = conf.getOrElse(PYTHON_SOCKET_TIMEOUT, "0").toInt
+  require(readTimeout >= 0, s"$PYTHON_SOCKET_TIMEOUT must be non-negative")
+  private val idleTimeout = TimeUnit.MINUTES.toNanos(positive(PYTHON_WORKER_IDLE_TIME, 1))
+  private val daemonWorkers = new mutable.HashMap[Socket, Int]()
+  private val simpleWorkers = new mutable.HashMap[Socket, Process]()
+  private val leasedWorkers = new mutable.HashSet[Socket]()
+  private val idleWorkers = new IdleWorkerPool(
+    conf.getOrElse(PYTHON_WORKER_MAX_IDLE, "64").toInt, idleTimeout,
+    positive(PYTHON_VALIDATE_TIMEOUT, 1), discardIdleWorker)
 
-  private val workerIdleTime = conf.getOrElse(PYTHON_WORKER_IDLE_TIME, "1").toInt
-
-  @GuardedBy("self")
   private var daemon: Process = null
-  val daemonHost = InetAddress.getByAddress(Array(127, 0, 0, 1))
-  @GuardedBy("self")
-  private var daemonPort: Int = 0
-  @GuardedBy("self")
-  private val daemonWorkers = new mutable.WeakHashMap[Socket, Int]()
-  @GuardedBy("self")
-  private val idleWorkers = new mutable.Queue[Socket]()
-  @GuardedBy("self")
-  private var lastActivityNs = 0L
+  val daemonHost: InetAddress = InetAddress.getByAddress(Array(127, 0, 0, 1))
+  private var daemonPort = 0
+  @volatile private var stopped = false
+  private val pythonPath = mergePythonPaths(
+    envVars.getOrElse("PYTHONPATH", ""), sys.env.getOrElse("PYTHONPATH", ""))
 
-
-  private val monitorThread = new MonitorThread()
-  monitorThread.setWorkerIdleTime(workerIdleTime)
+  private val monitorThread = new Thread(s"Idle Worker Monitor for $pythonExec") {
+    setDaemon(true)
+    override def run(): Unit = {
+      try {
+        while (!stopped) {
+          Thread.sleep(10000)
+          PythonWorkerFactory.this.synchronized { idleWorkers.evictExpired() }
+        }
+      } catch { case _: InterruptedException => () }
+    }
+  }
   monitorThread.start()
 
-  @GuardedBy("self")
-  private val simpleWorkers = new mutable.WeakHashMap[Socket, Process]()
+  private def positive(key: String, default: Int): Int = {
+    val value = conf.getOrElse(key, default.toString).toInt
+    require(value > 0, s"$key must be positive")
+    value
+  }
 
-  private val pythonPath = mergePythonPaths(
-    envVars.getOrElse("PYTHONPATH", ""),
-    sys.env.getOrElse("PYTHONPATH", ""))
-
-  def create(): Socket = {
-    val socket = if (useDaemon) {
-      self.synchronized {
-        if (idleWorkers.nonEmpty) {
-          return idleWorkers.dequeue()
-        }
-      }
-      createThroughDaemon()
-    } else {
-      createSimpleWorker()
+  def create(): Socket = synchronized {
+    if (stopped) throw new IllegalStateException("Python worker factory is stopped")
+    val socket = idleWorkers.borrow().getOrElse {
+      if (useDaemon) createThroughDaemon() else createSimpleWorker()
     }
+    leasedWorkers.add(socket)
     socket
   }
 
-  /**
-   * Connect to a worker launched through pyspark/daemon.py (by default), which forks python
-   * processes itself to avoid the high cost of forking from Java. This currently only works
-   * on UNIX-based systems.
-   */
+  private def configure(socket: Socket): Unit = {
+    socket.setTcpNoDelay(true)
+    socket.setKeepAlive(true)
+    socket.setSoTimeout(readTimeout)
+  }
+
   private def createThroughDaemon(): Socket = {
-
-    def createSocket(): Socket = {
-      val socket = new Socket(daemonHost, daemonPort)
-      val pid = new DataInputStream(socket.getInputStream).readInt()
-      if (pid < 0) {
-        throw new IllegalStateException("Python daemon failed to launch worker with code " + pid)
+    def connect(): Socket = {
+      val socket = new Socket()
+      try {
+        socket.connect(new InetSocketAddress(daemonHost, daemonPort), connectTimeout)
+        socket.setSoTimeout(startupTimeout)
+        val pid = new DataInputStream(socket.getInputStream).readInt()
+        if (pid <= 0) throw new IOException(s"Python daemon failed to launch worker (code $pid)")
+        configure(socket)
+        daemonWorkers.put(socket, pid)
+        socket
+      } catch {
+        case NonFatal(e) => closeSocket(socket); throw e
       }
-      daemonWorkers.put(socket, pid)
-      socket
     }
 
-    self.synchronized {
-      // Start the daemon if it hasn't been started
-      startDaemon()
-
-      // Attempt to connect, restart and retry once if it fails
-      try {
-        createSocket()
-      } catch {
-        case exc: SocketException =>
-          logWarning("Failed to open socket to Python daemon:", exc)
-          logWarning("Assuming that daemon unexpectedly quit, attempting to restart")
-          stopDaemon()
-          startDaemon()
-          createSocket()
-      }
+    startDaemon()
+    try connect()
+    catch {
+      // A bad handshake must not kill other tasks in a healthy daemon.
+      // Retry acquisition only, before any user code or data has been sent.
+      case e: IOException if daemon != null && !daemon.isAlive =>
+        logWarning("Python daemon exited; restarting before worker acquisition", e)
+        stopDaemon()
+        startDaemon()
+        connect()
     }
   }
 
-  /**
-   * Launch a worker by executing worker.py (by default) directly and telling it to connect to us.
-   */
+  private def processBuilder(module: String): ProcessBuilder = {
+    val envCommand = envVars.getOrElse("PYTHON_ENV", "").trim
+    def quote(value: String): String = "'" + value.replace("'", "'\"'\"'") + "'"
+    val command = if (envCommand.isEmpty) Seq(pythonExec, "-m", module)
+    else Seq("bash", "-c", envCommand + " && exec " + quote(pythonExec) + " -m " + quote(module))
+    val pb = new ProcessBuilder(command.asJava)
+    pb.environment().putAll(envVars.asJava)
+    pb.environment().put("PYTHONPATH", pythonPath)
+    pb.environment().put("PYTHONUNBUFFERED", "YES")
+    pb
+  }
+
   private def createSimpleWorker(): Socket = {
-    var serverSocket: ServerSocket = null
+    val server = new ServerSocket(0, 1, daemonHost)
+    var process: Process = null
+    var socket: Socket = null
     try {
-      serverSocket = new ServerSocket(0, 1, InetAddress.getByAddress(Array(127, 0, 0, 1)))
-
-      // Create and start the worker
-      val pb = new ProcessBuilder(Arrays.asList(pythonExec, "-m", workerModule))
-      val workerEnv = pb.environment()
-      workerEnv.putAll(envVars.asJava)
-      workerEnv.put("PYTHONPATH", pythonPath)
-      // This is equivalent to setting the -u flag; we use it because ipython doesn't support -u:
-      workerEnv.put("PYTHONUNBUFFERED", "YES")
-      workerEnv.put("PYTHON_WORKER_FACTORY_PORT", serverSocket.getLocalPort.toString)
-      val worker = pb.start()
-
-      // Redirect worker stdout and stderr
-      Utils.redirectStream(conf, worker.getInputStream)
-      Utils.redirectStream(conf, worker.getErrorStream)
-
-      // Wait for it to connect to our socket, and validate the auth secret.
-      serverSocket.setSoTimeout(10000)
-
-      try {
-        val socket = serverSocket.accept()
-        self.synchronized {
-          simpleWorkers.put(socket, worker)
-        }
-        return socket
-      } catch {
-        case e: Exception =>
-          throw new RuntimeException("Python worker failed to connect back.", e)
-      }
-    } finally {
-      if (serverSocket != null) {
-        serverSocket.close()
-      }
-    }
-    null
+      server.setSoTimeout(startupTimeout)
+      val pb = processBuilder(workerModule)
+      pb.environment().put("PYTHON_WORKER_FACTORY_PORT", server.getLocalPort.toString)
+      process = pb.start()
+      Utils.redirectStream(conf, process.getInputStream)
+      Utils.redirectStream(conf, process.getErrorStream)
+      socket = server.accept()
+      configure(socket)
+      simpleWorkers.put(socket, process)
+      socket
+    } catch {
+      case NonFatal(e) =>
+        if (socket != null) closeSocket(socket)
+        if (process != null) process.destroyForcibly()
+        throw new IOException("Python worker failed to connect back", e)
+    } finally { server.close() }
   }
 
-  private def startDaemon() {
-    self.synchronized {
-      // Is it already running?
-      if (daemon != null) {
-        return
+  private def startDaemon(): Unit = {
+    if (daemon != null && daemon.isAlive) return
+    if (daemon != null) stopDaemon()
+    try {
+      daemon = processBuilder(daemonModule).start()
+      // Drain stderr before the port handshake so imports cannot fill the pipe.
+      Utils.redirectStream(conf, daemon.getErrorStream)
+      val in = new DataInputStream(daemon.getInputStream)
+      val portRead = new FutureTask[Int](new Callable[Int] {
+        override def call(): Int = in.readInt()
+      })
+      val reader = new Thread(portRead, s"Python daemon startup for $pythonExec")
+      reader.setDaemon(true)
+      reader.start()
+      try daemonPort = portRead.get(startupTimeout, TimeUnit.MILLISECONDS)
+      catch {
+        case e: TimeoutException =>
+          portRead.cancel(true)
+          throw new IOException(s"Python daemon did not announce a port within $startupTimeout ms", e)
+        case e: ExecutionException =>
+          throw new IOException(s"Cannot read port from $daemonModule; see worker stderr", e.getCause)
+        case e: InterruptedException =>
+          portRead.cancel(true)
+          Thread.currentThread().interrupt()
+          throw e
       }
-
-      try {
-        // Create and start the daemon
-        val envCommand = envVars.getOrElse(ScalaMethodMacros.str(PythonConf.PYTHON_ENV), "")
-        val command = Seq("bash", "-c", envCommand + s" &&  python -m ${daemonModule}")
-        val pb = new ProcessBuilder(command.asJava)
-        val workerEnv = pb.environment()
-        workerEnv.putAll(envVars.asJava)
-        workerEnv.put("PYTHONPATH", pythonPath)
-        // This is equivalent to setting the -u flag; we use it because ipython doesn't support -u:
-        workerEnv.put("PYTHONUNBUFFERED", "YES")
-        daemon = pb.start()
-
-        val in = new DataInputStream(daemon.getInputStream)
-        try {
-          daemonPort = in.readInt()
-        } catch {
-          case _: EOFException =>
-            throw new RuntimeException(s"No port number in $daemonModule's stdout")
-        }
-
-        // test that the returned port number is within a valid range.
-        // note: this does not cover the case where the port number
-        // is arbitrary data but is also coincidentally within range
-        if (daemonPort < 1 || daemonPort > 0xffff) {
-          val exceptionMessage =
-            f"""
-               |Bad data in $daemonModule's standard output. Invalid port number:
-               |  $daemonPort (0x$daemonPort%08x)
-               |Python command to execute the daemon was:
-               |  ${command.mkString(" ")}
-               |Check that you don't have any unexpected modules or libraries in
-               |your PYTHONPATH:
-               |  $pythonPath
-               |Also, check if you have a sitecustomize.py module in your python path,
-               |or in your python installation, that is printing to standard output"""
-          throw new RuntimeException(exceptionMessage.stripMargin)
-        }
-
-        // Redirect daemon stdout and stderr
-        Utils.redirectStream(conf, in)
-        Utils.redirectStream(conf, daemon.getErrorStream)
-      } catch {
-        case e: Exception =>
-
-          // If the daemon exists, wait for it to finish and get its stderr
-          val stderr = Option(daemon)
-            .flatMap { d => Utils.getStderr(d, PROCESS_WAIT_TIMEOUT_MS) }
-            .getOrElse("")
-
-          stopDaemon()
-
-          if (stderr != "") {
-            val formattedStderr = stderr.replace("\n", "\n  ")
-            val errorMessage =
-              s"""
-                 |Error from python worker:
-                 |  $formattedStderr
-                 |PYTHONPATH was:
-                 |  $pythonPath
-                 |$e"""
-
-            // Append error message from python daemon, but keep original stack trace
-            val wrappedException = new RuntimeException(errorMessage.stripMargin)
-            wrappedException.setStackTrace(e.getStackTrace)
-            throw wrappedException
-          } else {
-            throw e
-          }
-      }
-
-      // Important: don't close daemon's stdin (daemon.getOutputStream) so it can correctly
-      // detect our disappearance.
+      if (daemonPort < 1 || daemonPort > 65535)
+        throw new IOException(s"Invalid Python daemon port $daemonPort; stdout must contain protocol data only")
+      Utils.redirectStream(conf, in)
+    } catch {
+      case NonFatal(e) => stopDaemon(); throw e
+      case e: InterruptedException => stopDaemon(); throw e
     }
   }
 
-
-  /**
-   * Monitor all the idle workers, kill them after timeout.
-   */
-  private class MonitorThread extends Thread(s"Idle Worker Monitor for $pythonExec") {
-    //minutes
-    val IDLE_WORKER_TIMEOUT_NS_REF = new AtomicLong(TimeUnit.MINUTES.toNanos(1))
-
-    def setWorkerIdleTime(minutes: Int) = {
-      IDLE_WORKER_TIMEOUT_NS_REF.set(TimeUnit.MINUTES.toNanos(minutes))
-    }
-
-    setDaemon(true)
-
-    override def run() {
-      while (true) {
-        self.synchronized {
-          if (IDLE_WORKER_TIMEOUT_NS_REF.get() < System.nanoTime() - lastActivityNs) {
-            cleanupIdleWorkers()
-            lastActivityNs = System.nanoTime()
-          }
-        }
-        Thread.sleep(10000)
-      }
-    }
+  private def closeSocket(socket: Socket): Unit = {
+    try socket.close()
+    catch { case NonFatal(e) => logWarning("Failed to close Python worker socket", e) }
   }
 
-  private def cleanupIdleWorkers() {
-    while (idleWorkers.nonEmpty) {
-      val worker = idleWorkers.dequeue()
-      try {
-        // the worker will exit after closing the socket
-        worker.close()
-      } catch {
-        case e: Exception =>
-          logWarning("Failed to close worker socket", e)
-      }
+  private def discardIdleWorker(socket: Socket): Unit = {
+    // Idle workers await their next request, so EOF releases them. Do not
+    // signal a cached PID here: a dead worker's PID may have been reused.
+    daemonWorkers.remove(socket)
+    simpleWorkers.remove(socket).foreach(_.destroy())
+    closeSocket(socket)
+  }
+
+  private def stopDaemon(): Unit = {
+    idleWorkers.clear()
+    daemonWorkers.keys.toList.foreach(closeSocket)
+    daemonWorkers.clear()
+    leasedWorkers.clear()
+    if (daemon != null) daemon.destroy()
+    daemon = null
+    daemonPort = 0
+  }
+
+  def stop(): Unit = synchronized {
+    if (!stopped) {
+      stopped = true
+      monitorThread.interrupt()
+      stopDaemon()
+      simpleWorkers.foreach { case (socket, process) => closeSocket(socket); process.destroyForcibly() }
+      simpleWorkers.clear()
     }
   }
 
-  private def stopDaemon() {
-    self.synchronized {
-      if (useDaemon) {
-        cleanupIdleWorkers()
-
-        // Request shutdown of existing daemon by sending SIGTERM
-        if (daemon != null) {
-          daemon.destroy()
-        }
-
-        daemon = null
-        daemonPort = 0
-      } else {
-        simpleWorkers.mapValues(_.destroy())
+  def stopWorker(worker: Socket): Unit = synchronized {
+    idleWorkers.remove(worker)
+    leasedWorkers.remove(worker)
+    val pid = daemonWorkers.remove(worker)
+    try {
+      if (daemon != null && daemon.isAlive) pid.foreach { value =>
+        val out = new DataOutputStream(daemon.getOutputStream)
+        out.writeInt(value)
+        out.flush()
       }
+    } catch { case NonFatal(e) => logWarning("Cannot notify Python daemon of worker cancellation", e) }
+    finally {
+      simpleWorkers.remove(worker).foreach(_.destroyForcibly())
+      closeSocket(worker)
     }
   }
 
-  def stop() {
-    stopDaemon()
-  }
-
-  def stopWorker(worker: Socket) {
-    self.synchronized {
-      if (useDaemon) {
-        if (daemon != null) {
-          daemonWorkers.get(worker).foreach { pid =>
-            // tell daemon to kill worker by pid
-            val output = new DataOutputStream(daemon.getOutputStream)
-            output.writeInt(pid)
-            output.flush()
-            daemon.getOutputStream.flush()
-          }
-        }
-      } else {
-        simpleWorkers.get(worker).foreach(_.destroy())
-      }
-    }
-    worker.close()
-  }
-
-  def releaseWorker(worker: Socket) {
-    if (useDaemon) {
-      self.synchronized {
-        lastActivityNs = System.nanoTime()
-        idleWorkers.enqueue(worker)
-      }
-    } else {
-      // Cleanup the worker socket. This will also cause the Python worker to exit.
-      try {
-        worker.close()
-      } catch {
-        case e: Exception =>
-          logWarning("Failed to close worker socket", e)
-      }
+  def releaseWorker(worker: Socket): Unit = synchronized {
+    if (leasedWorkers.remove(worker)) {
+      if (useDaemon && !stopped && daemon != null && daemon.isAlive) idleWorkers.release(worker)
+      else discardIdleWorker(worker)
     }
   }
 }
 
 object PythonWorkerFactory {
+  import Tool._
+  private type Key = (String, Map[String, String], Map[String, String])
+  private val pythonWorkers = new mutable.HashMap[Key, PythonWorkerFactory]()
+  private val owners = new java.util.WeakHashMap[Socket, PythonWorkerFactory]()
+  private val factoryOptions = Set(PYTHON_DAEMON_MODULE, PYTHON_WORKER_MODULE,
+    PYTHON_USE_DAEMON, PYTHON_WORKER_IDLE_TIME, PYTHON_WORKER_MAX_IDLE,
+    PYTHON_CONNECT_TIMEOUT, PYTHON_STARTUP_TIMEOUT, PYTHON_SOCKET_TIMEOUT,
+    PYTHON_VALIDATE_TIMEOUT, REDIRECT_IMPL)
 
-  private val pythonWorkers = mutable.HashMap[(String, Map[String, String]), PythonWorkerFactory]()
+  def createPythonWorker(pythonExec: String, envVars: Map[String, String], conf: Map[String, String]): Socket = {
+    val factory = synchronized {
+      val key = (pythonExec, envVars, conf.filter { case (k, _) => factoryOptions.contains(k) })
+      pythonWorkers.getOrElseUpdate(key, new PythonWorkerFactory(pythonExec, envVars, conf))
+    }
+    // Starting one environment must not block every other pool.
+    val worker = factory.create()
+    synchronized { owners.put(worker, factory) }
+    worker
+  }
 
-  def createPythonWorker(pythonExec: String, envVars: Map[String, String], conf: Map[String, String]): java.net.Socket = {
-    synchronized {
-      val key = (pythonExec, envVars)
-      pythonWorkers.getOrElseUpdate(key, new PythonWorkerFactory(pythonExec, envVars, conf)).create()
+  def destroyPythonWorker(pythonExec: String, envVars: Map[String, String], worker: Socket): Unit =
+    destroyPythonWorker(worker)
+
+  def destroyPythonWorker(worker: Socket): Unit = {
+    val owner = synchronized { Option(owners.remove(worker)) }
+    owner match {
+      case Some(factory) => factory.stopWorker(worker)
+      case None => worker.close()
     }
   }
 
-
-  def destroyPythonWorker(pythonExec: String, envVars: Map[String, String], worker: Socket) {
-    synchronized {
-      val key = (pythonExec, envVars)
-      pythonWorkers.get(key).foreach(_.stopWorker(worker))
+  def releasePythonWorker(pythonExec: String, envVars: Map[String, String], worker: Socket): Unit = {
+    val owner = synchronized { Option(owners.get(worker)) }
+    owner match {
+      case Some(factory) => factory.releaseWorker(worker)
+      case None => worker.close()
     }
   }
 
-
-  def releasePythonWorker(pythonExec: String, envVars: Map[String, String], worker: Socket) {
-    synchronized {
-      val key = (pythonExec, envVars)
-      pythonWorkers.get(key).foreach(_.releaseWorker(worker))
+  /** Application shutdown; callers must finish or cancel their tasks first. */
+  def shutdownAll(): Unit = {
+    val factories = synchronized {
+      val all = pythonWorkers.values.toList
+      pythonWorkers.clear()
+      owners.clear()
+      all
     }
+    factories.foreach(_.stop())
   }
-
 
   object Tool {
     val PROCESS_WAIT_TIMEOUT_MS = 10000
     val PYTHON_DAEMON_MODULE = "python.daemon.module"
     val PYTHON_WORKER_MODULE = "python.worker.module"
+    val PYTHON_USE_DAEMON = "python.use.daemon"
     val PYTHON_WORKER_IDLE_TIME = "python.worker.idle.time"
+    val PYTHON_WORKER_MAX_IDLE = "python.worker.pool.maxIdle"
+    val PYTHON_CONNECT_TIMEOUT = "python.connect.timeout"
+    val PYTHON_STARTUP_TIMEOUT = "python.worker.startup.timeout"
+    val PYTHON_SOCKET_TIMEOUT = "python.socket.read.timeout"
+    val PYTHON_VALIDATE_TIMEOUT = "python.worker.validate.timeout"
     val PYTHON_TASK_KILL_TIMEOUT = "python.task.killTimeout"
     val REDIRECT_IMPL = "python.redirect.impl"
 
-    def mergePythonPaths(paths: String*): String = {
-      paths.filter(_ != "").mkString(File.pathSeparator)
-    }
+    def mergePythonPaths(paths: String*): String = paths.filter(_ != "").mkString(File.pathSeparator)
   }
-
 }

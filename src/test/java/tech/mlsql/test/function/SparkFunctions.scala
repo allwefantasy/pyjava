@@ -28,8 +28,8 @@ import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.types.StructType
 import tech.mlsql.arrow.python.ispark.SparkContextImp
-import tech.mlsql.arrow.python.runner.{ArrowPythonRunner, ChainedPythonFunctions, PythonConf, PythonFunction}
-import tech.mlsql.common.utils.lang.sc.ScalaMethodMacros.str
+import tech.mlsql.arrow.python.runner.{ArrowPythonRunner, ChainedPythonFunctions, PythonFunction}
+
 import java.util
 
 import scala.collection.JavaConverters.asScalaIteratorConverter
@@ -42,7 +42,7 @@ object SparkFunctions {
     iter =>
       val encoder = WowRowEncoder.fromRow(struct)
       val envs = new util.HashMap[String, String]()
-      envs.put(str(PythonConf.PYTHON_ENV), "source ~/.bash_profile && conda activate dev && export ARROW_PRE_0_15_IPC_FORMAT=1")
+      envs.put("PYTHON_ENV", "source ~/.bash_profile && conda activate dev && export ARROW_PRE_0_15_IPC_FORMAT=1")
       envs.put("PYTHONPATH", (os.pwd / "python").toString())
       val batch = new ArrowPythonRunner(
         Seq(ChainedPythonFunctions(Seq(PythonFunction(

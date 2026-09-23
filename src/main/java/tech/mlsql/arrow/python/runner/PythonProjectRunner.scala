@@ -5,8 +5,7 @@ import java.util.concurrent.atomic.AtomicReference
 
 import os.SubProcess
 import tech.mlsql.arrow.Utils
-import tech.mlsql.common.utils.log.Logging
-import tech.mlsql.common.utils.shell.ShellCommand
+import tech.mlsql.arrow.log.Logging
 
 import scala.io.Source
 
@@ -33,7 +32,8 @@ class PythonProjectRunner(projectDirectory: String,
       val f = proc.wrapped.getClass.getDeclaredField("pid")
       f.setAccessible(true)
       val parentPid = f.getLong(proc.wrapped)
-      val subPid = ShellCommand.execCmdV2("pgrep", "-P", parentPid).out.lines.mkString("")
+      val subPid = os.proc(Seq("pgrep", "-P", parentPid.toString)).call(
+        stderr = os.Pipe, check = false).out.lines.mkString("")
       (parentPid, subPid)
     } catch {
       case e: Exception =>
@@ -122,7 +122,7 @@ class PythonProjectRunner(projectDirectory: String,
       }
 
       private def cleanup(): Unit = {
-        ShellCommand.execCmdV2("kill", "-9", pythonPid + "")
+        os.proc(Seq("kill", "-9", pythonPid.toString)).call(stderr = os.Pipe, check = false)
         // cleanup task working directory if used
         scala.util.control.Exception.ignoring(classOf[IOException]) {
           if (conf.get(KEEP_LOCAL_DIR).map(_.toBoolean).getOrElse(false)) {

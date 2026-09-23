@@ -7,8 +7,9 @@ import org.scalatest.{BeforeAndAfterAll, DoNotDiscover}
 import org.scalatest.funsuite.AnyFunSuite
 import streaming.core.NotToRunTag
 import tech.mlsql.arrow.python.iapp.{AppContextImpl, JavaContext}
+import java.net.InetAddress
+
 import tech.mlsql.arrow.python.runner.SparkSocketRunner
-import tech.mlsql.common.utils.network.NetUtils
 
 /**
  * 24/12/2019 WilliamZhu(allwefantasy@gmail.com)
@@ -17,7 +18,7 @@ import tech.mlsql.common.utils.network.NetUtils
 class JavaArrowServer extends AnyFunSuite with BeforeAndAfterAll {
 
   test("test java arrow server", NotToRunTag) {
-    val socketRunner = new SparkSocketRunner("wow", NetUtils.getHost, "Asia/Harbin")
+    val socketRunner = new SparkSocketRunner("wow", InetAddress.getLocalHost.getHostAddress, "Asia/Harbin")
 
     val dataSchema = StructType(Seq(StructField("value", StringType)))
     val encoder = WowRowEncoder.fromRow(dataSchema) //RowEncoder.apply(dataSchema).resolveAndBind()
@@ -34,7 +35,7 @@ class JavaArrowServer extends AnyFunSuite with BeforeAndAfterAll {
 
   test("test read python arrow server", NotToRunTag) {
     val enconder = WowRowEncoder.toRow(StructType(Seq(StructField("a", LongType),StructField("b", LongType))))
-    val socketRunner = new SparkSocketRunner("wow", NetUtils.getHost, "Asia/Harbin")
+    val socketRunner = new SparkSocketRunner("wow", InetAddress.getLocalHost.getHostAddress, "Asia/Harbin")
     val javaConext = new JavaContext
     val commonTaskContext = new AppContextImpl(javaConext, null)
     val iter = socketRunner.readFromStreamWithArrow("127.0.0.1", 11111, commonTaskContext)

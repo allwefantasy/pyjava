@@ -12,6 +12,26 @@ by default.
 
 > The initial code in this lib is from Apache Spark.
 
+Worker reuse, socket timeouts, idle limits, Arrow batch sizing and the real
+transport regression suite are documented in
+[Socket and Arrow transport reliability](docs/transport-reliability.md).
+
+For large Spark/Ray partitions, use `RayContext.map_batches(transform)` where
+`transform` consumes and yields Arrow `RecordBatch` objects. This avoids the
+Pandas/row conversion path and preserves Arrow types. Existing `map_iter` and
+row APIs remain available.
+
+Spark producers that return an endpoint **before** a downstream task reads it
+must use `serveToStreamWithArrow(..., context, Map("python.socket.detached" ->
+"true"))`. That option commits the partition to quota-limited temporary storage
+before the producing task finishes. Direct streaming remains task-owned by
+default. Ray output snapshots can be reread during their lease without rerunning
+the transformation. Configure batch bytes, spool quotas and lease duration for
+the workload; these are per-partition bounds, not cluster-wide admission control.
+
+See [Spark/Ray changes and real-engine validation](docs/spark-ray-transfer-validation-2026-09-23.md)
+for the API contract, configuration, task-retry tests and measured limits.
+
 
 ## Install
 
@@ -223,7 +243,7 @@ data_manager.set_output([[df['AAA'],df['BBB']]])
 Java Server side:
 
 ```scala
-val socketRunner = new SparkSocketRunner("wow", NetUtils.getHost, "Asia/Harbin")
+val socketRunner = new SparkSocketRunner("wow", java.net.InetAddress.getLocalHost.getHostAddress, "Asia/Harbin")
 
 val dataSchema = StructType(Seq(StructField("value", StringType)))
 val enconder = RowEncoder.apply(dataSchema).resolveAndBind()
@@ -253,8 +273,10 @@ out_ser = ArrowStreamPandasSerializer("Asia/Harbin", False, None)
 HOST = ""
 PORT = -1
 with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+    from pyjava.utils import configure_transfer_socket, data_socket_buffer
+    configure_transfer_socket(sock)
     sock.connect((HOST, PORT))
-    buffer_size = int(os.environ.get("SPARK_BUFFER_SIZE", 65536))
+    buffer_size = data_socket_buffer()
     infile = os.fdopen(os.dup(sock.fileno()), "rb", buffer_size)
     outfile = os.fdopen(os.dup(sock.fileno()), "wb", buffer_size)
     kk = out_ser.load_stream(infile)
@@ -288,10 +310,9 @@ import org.apache.spark.sql.types.{LongType, StringType, StructField, StructType
 import org.scalatest.{BeforeAndAfterAll, FunSuite}
 import tech.mlsql.arrow.python.iapp.{AppContextImpl, JavaContext}
 import tech.mlsql.arrow.python.runner.SparkSocketRunner
-import tech.mlsql.common.utils.network.NetUtils
 
 val enconder = RowEncoder.apply(StructType(Seq(StructField("a", LongType),StructField("b", LongType)))).resolveAndBind()
-val socketRunner = new SparkSocketRunner("wow", NetUtils.getHost, "Asia/Harbin")
+val socketRunner = new SparkSocketRunner("wow", "127.0.0.1", "Asia/Harbin")
 val javaConext = new JavaContext
 val commonTaskContext = new AppContextImpl(javaConext, null)
 val iter = socketRunner.readFromStreamWithArrow("127.0.0.1", 11111, commonTaskContext)
@@ -300,5 +321,3 @@ javaConext.close
 ```
 
 ## How to configure python worker runs in Docker (todo)
-
-

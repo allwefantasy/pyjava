@@ -35,8 +35,7 @@ import tech.mlsql.arrow.python.iapp.{AppContextImpl, JavaContext}
 import tech.mlsql.arrow.python.ispark.SparkContextImp
 import java.io.{ByteArrayInputStream, ByteArrayOutputStream, FileInputStream, OutputStream}
 import java.nio.channels.{Channels, ReadableByteChannel}
-
-import tech.mlsql.common.utils.lang.sc.ScalaReflect
+import java.util.concurrent.atomic.AtomicBoolean
 
 import scala.collection.JavaConverters._
 
@@ -135,6 +134,78 @@ object ArrowConverters {
 
         out.toByteArray
       }
+    }
+  }
+
+  /**
+   * Writes a legacy Arrow stream (schema, record batches, end-of-stream int) straight to `out`.
+   * Same bytes as [[ArrowBatchStreamWriter]] over [[toBatchIterator]], without a per-batch
+   * `Array[Byte]` copy. Batches have both record and byte limits.
+   * Does not close `out`. The writer thread owns the allocator; task cancellation should
+   * close the socket so this call unblocks and releases it.
+   */
+  def writeLegacyArrowStream(
+                              rowIter: Iterator[InternalRow],
+                              schema: StructType,
+                              maxRecordsPerBatch: Int,
+                              timeZoneId: String,
+                              out: OutputStream,
+                              context: CommonTaskContext,
+                              maxBytesPerBatch: Long = 8L * 1024 * 1024,
+                              maxAllocation: Long = 128L * 1024 * 1024): Unit = {
+    require(maxRecordsPerBatch > 0 && maxBytesPerBatch > 0 && maxAllocation >= maxBytesPerBatch)
+    val arrowSchema = ArrowUtils.toArrowSchema(schema, timeZoneId)
+    val allocator = ArrowUtils.rootAllocator.newChildAllocator(
+      "arrow socket writer", 0, maxAllocation)
+    val root = VectorSchemaRoot.create(arrowSchema, allocator)
+    val arrowWriter = ArrowWriter.create(root)
+    val released = new AtomicBoolean(false)
+    def release(): Unit = {
+      if (released.compareAndSet(false, true)) {
+        try root.close()
+        finally allocator.close()
+      }
+    }
+    val writeChannel = new WriteChannel(Channels.newChannel(out))
+    Utils.tryWithSafeFinally {
+      MessageSerializer.serialize(writeChannel, arrowSchema)
+      while (rowIter.hasNext) {
+        Utils.tryWithSafeFinally {
+          var rowCount = 0
+          var batchBytes = 0L
+          while (rowCount < maxRecordsPerBatch && batchBytes < maxBytesPerBatch && rowIter.hasNext) {
+            context.killTaskIfInterrupted()()
+            arrowWriter.write(rowIter.next())
+            rowCount += 1
+            batchBytes = root.getFieldVectors.asScala.map(_.getBufferSizeFor(rowCount).toLong).sum
+            if (rowCount == 1 && batchBytes > maxBytesPerBatch) {
+              throw new IllegalArgumentException("Single Arrow row exceeds python.arrow.maxBytesPerBatch")
+            }
+          }
+          arrowWriter.finish()
+          def serialize(part: VectorSchemaRoot): Unit = {
+            val size = part.getFieldVectors.asScala.map(_.getBufferSize.toLong).sum
+            if (size > maxBytesPerBatch && part.getRowCount > 1) {
+              val half = part.getRowCount / 2
+              val left = part.slice(0, half)
+              try serialize(left) finally left.close()
+              val right = part.slice(half, part.getRowCount - half)
+              try serialize(right) finally right.close()
+            } else {
+              require(size <= maxBytesPerBatch, "Single Arrow row exceeds byte budget")
+              val batch = new VectorUnloader(part).getRecordBatch()
+              try MessageSerializer.serialize(writeChannel, batch) finally batch.close()
+            }
+          }
+          serialize(root)
+        } {
+          arrowWriter.reset()
+        }
+      }
+      // Legacy stream end. A continuation token would break ARROW_PRE_0_15_IPC_FORMAT readers.
+      writeChannel.writeIntLittleEndian(0)
+    } {
+      release()
     }
   }
 

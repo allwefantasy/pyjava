@@ -17,7 +17,8 @@ trait CommonTaskContext {
 
   /**
     * When reader begins to read, it will invoke the return function. Please use something to remember them
-    * and When the task is done, use the returned function to clean the reader resource
+    * and when the task is done, invoke callback and clean the reader resource.
+    * reader/allocator may be null when callback owns their lifetime (lazy readers).
     */
   def readerRegister(callback: () => Unit): (ArrowStreamReader, BufferAllocator) => Unit
 

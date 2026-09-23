@@ -40,6 +40,18 @@ def compute_real_exit_code(exit_code):
         return 1
 
 
+def fork_worker():
+    """A failed fork must fail this acquisition, not tear down other workers."""
+    for attempt in range(2):
+        try:
+            return os.fork()
+        except OSError as error:
+            if attempt == 0 and error.errno in (EAGAIN, EINTR):
+                time.sleep(1)
+            else:
+                return -(error.errno or 1)
+
+
 def worker(sock):
     """
     Called by a worker process after the fork().
@@ -54,7 +66,7 @@ def worker(sock):
     # Read the socket using fdopen instead of socket.makefile() because the latter
     # seems to be very slow; note that we need to dup() the file descriptor because
     # otherwise writes also cause a seek that makes us miss data on the read side.
-    buffer_size = int(os.environ.get("SPARK_BUFFER_SIZE", 65536))
+    buffer_size = int(os.environ.get("BUFFER_SIZE", os.environ.get("SPARK_BUFFER_SIZE", 65536)))
     infile = os.fdopen(os.dup(sock.fileno()), "rb", buffer_size)
     outfile = os.fdopen(os.dup(sock.fileno()), "wb", buffer_size)
 
@@ -68,6 +80,12 @@ def worker(sock):
             outfile.flush()
         except Exception:
             pass
+        finally:
+            # Close both duplicated descriptors on every task, including errors.
+            try:
+                infile.close()
+            finally:
+                outfile.close()
     return exit_code
 
 
@@ -97,13 +115,23 @@ def manager():
         shutdown(1)
     signal.signal(SIGTERM, handle_sigterm)  # Gracefully exit on SIGTERM
     signal.signal(SIGHUP, SIG_IGN)  # Don't die on SIGHUP
-    signal.signal(SIGCHLD, SIG_IGN)
+    signal.signal(SIGCHLD, SIG_DFL)
+    children = set()
+
+    def reap_children():
+        for child in list(children):
+            try:
+                if os.waitpid(child, os.WNOHANG)[0]:
+                    children.discard(child)
+            except ChildProcessError:
+                children.discard(child)
 
     reuse = os.environ.get("PY_WORKER_REUSE")
 
     # Initialization complete
     try:
         while True:
+            reap_children()
             try:
                 ready_fds = select.select([0, listen_sock], [], [], 1)[0]
             except select.error as ex:
@@ -118,33 +146,37 @@ def manager():
                 except EOFError:
                     # Spark told us to exit by closing stdin
                     shutdown(0)
-                try:
-                    os.kill(worker_pid, signal.SIGKILL)
-                except OSError:
-                    pass  # process already died
+                # A cached PID may already belong to an unrelated process. Only
+                # signal our unreaped children; zombies retain their PID.
+                if worker_pid in children:
+                    try:
+                        if os.waitpid(worker_pid, os.WNOHANG)[0] == 0:
+                            os.kill(worker_pid, signal.SIGKILL)
+                        else:
+                            children.discard(worker_pid)
+                    except OSError:
+                        children.discard(worker_pid)
 
             if listen_sock in ready_fds:
                 try:
                     sock, _ = listen_sock.accept()
+                    sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                    sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
                 except OSError as e:
                     if e.errno == EINTR:
                         continue
                     raise
 
                 # Launch a worker process
-                try:
-                    pid = os.fork()
-                except OSError as e:
-                    if e.errno in (EAGAIN, EINTR):
-                        time.sleep(1)
-                        pid = os.fork()  # error here will shutdown daemon
-                    else:
-                        outfile = sock.makefile(mode='wb')
-                        write_int(e.errno, outfile)  # Signal that the fork failed
-                        outfile.flush()
-                        outfile.close()
+                pid = fork_worker()
+                if pid < 0:
+                    try:
+                        with sock.makefile(mode='wb') as outfile:
+                            write_int(pid, outfile)
+                            outfile.flush()
+                    finally:
                         sock.close()
-                        continue
+                    continue
 
                 if pid == 0:
                     # in child process
@@ -187,6 +219,7 @@ def manager():
                     else:
                         os._exit(0)
                 else:
+                    children.add(pid)
                     sock.close()
 
     finally:

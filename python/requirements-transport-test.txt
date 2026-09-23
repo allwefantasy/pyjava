@@ -1,0 +1,4 @@
+# Isolated transport tests: Python 3.9/3.10 (the bundled cloudpickle predates 3.11).
+pyarrow==18.1.0
+pandas==2.2.3
+requests==2.32.5

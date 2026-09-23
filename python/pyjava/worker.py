@@ -18,6 +18,7 @@
 from __future__ import print_function
 
 from pyjava.api.mlsql import PythonContext
+from pyjava.barrier import BarrierTaskContext
 from pyjava.cache.code_cache import CodeCache
 from pyjava.utils import *
 
@@ -93,6 +94,7 @@ def main(infile, outfile):
 
         is_barrier = read_bool(infile)
         bound_port = read_int(infile)
+        BarrierTaskContext.initialize(is_barrier, bound_port)
         logging.info(f"is_barrier {is_barrier}, port {bound_port}")
 
         conf = {}
@@ -125,14 +127,24 @@ def main(infile, outfile):
                     data_manager = PythonContext(context_id, input_data, conf)
                     context = data_manager
                     global globals_namespace
+                    globals_namespace["BarrierTaskContext"] = BarrierTaskContext
                     exec(code, globals_namespace, globals_namespace)
                 else:
                     data_manager = PythonContext(context_id, input_data, conf)
-                    n_local = {"data_manager": data_manager, "context": data_manager}
+                    n_local = {
+                        "data_manager": data_manager,
+                        "context": data_manager,
+                        "BarrierTaskContext": BarrierTaskContext,
+                    }
                     exec(code, n_local, n_local)
                 out_iter = data_manager.output()
                 write_int(SpecialLengths.START_ARROW_STREAM, outfile)
                 out_ser.dump_stream(out_iter, outfile)
+                # User code may consume only a prefix (or none) of the input.
+                # Drain the remaining Arrow batches before the reuse handshake.
+                # Otherwise the next header is mistaken for END_OF_STREAM.
+                for _ in input_data:
+                    pass
             finally:
 
                 try:
@@ -168,19 +180,27 @@ def main(infile, outfile):
             print("Py worker failed with exception:", file=sys.stderr)
             print(traceback.format_exc(), file=sys.stderr)
         sys.exit(-1)
-
-    write_int(SpecialLengths.END_OF_DATA_SECTION, outfile)
-    flag = read_int(infile)
-    if flag == SpecialLengths.END_OF_STREAM:
-        write_int(SpecialLengths.END_OF_STREAM, outfile)
     else:
-        # write a different value to tell JVM to not reuse this worker
         write_int(SpecialLengths.END_OF_DATA_SECTION, outfile)
-        sys.exit(-1)
+        flag = read_int(infile)
+        if flag == SpecialLengths.END_OF_STREAM:
+            write_int(SpecialLengths.END_OF_STREAM, outfile)
+            outfile.flush()
+        else:
+            # write a different value to tell JVM to not reuse this worker
+            write_int(SpecialLengths.END_OF_DATA_SECTION, outfile)
+            sys.exit(-1)
+    finally:
+        # A reused process must not keep the previous task's callback port.
+        BarrierTaskContext.reset()
 
 
 if __name__ == '__main__':
     # Read information about how to connect back to the JVM from the environment.
     java_port = int(os.environ["PYTHON_WORKER_FACTORY_PORT"])
-    (sock_file, _) = local_connect_and_auth(java_port)
-    main(sock_file, sock_file)
+    (sock_file, sock) = local_connect_and_auth(java_port)
+    try:
+        main(sock_file, sock_file)
+    finally:
+        sock_file.close()
+        sock.close()

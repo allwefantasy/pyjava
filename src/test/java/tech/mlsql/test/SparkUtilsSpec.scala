@@ -9,8 +9,9 @@ import org.scalatest.funsuite.AnyFunSuite
 class SparkUtilsSpec extends AnyFunSuite {
 
   test("finds SparkSession internalCreateDataFrame overload used by SparkUtils") {
-    val method = internalCreateDataFrameMethod(
-      Class.forName("org.apache.spark.sql.classic.SparkSession"))
+    val owner = scala.util.Try(Class.forName("org.apache.spark.sql.classic.SparkSession"))
+      .getOrElse(classOf[SparkSession])
+    val method = internalCreateDataFrameMethod(owner)
 
     assert(method.isDefined)
     assert(classOf[Dataset[_]].isAssignableFrom(method.get.getReturnType))

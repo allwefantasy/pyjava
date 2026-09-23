@@ -27,9 +27,7 @@ import org.apache.spark._
 import tech.mlsql.arrow.Utils
 import tech.mlsql.arrow.context.CommonTaskContext
 import tech.mlsql.arrow.python.PythonWorkerFactory
-import tech.mlsql.common.utils.lang.sc.ScalaMethodMacros.str
-import tech.mlsql.common.utils.lang.sc.ScalaReflect
-import tech.mlsql.common.utils.log.Logging
+import tech.mlsql.arrow.log.Logging
 
 import scala.collection.JavaConverters._
 import scala.util.control.NonFatal
@@ -68,7 +66,8 @@ abstract class BasePythonRunner[IN, OUT](
   private val memoryMb = conf.get(PY_EXECUTOR_MEMORY).map(_.toInt / conf.getOrElse(EXECUTOR_CORES, "1").toInt)
 
   // All the Python functions should have the same exec, version and envvars.
-  protected val envVars: java.util.Map[String, String] = funcs.head.funcs.head.envVars
+  protected val envVars: java.util.Map[String, String] =
+    new java.util.HashMap[String, String](funcs.head.funcs.head.envVars)
   protected val pythonExec: String = funcs.head.funcs.head.pythonExec
   protected val pythonVer: String = funcs.head.funcs.head.pythonVer
 
@@ -82,15 +81,18 @@ abstract class BasePythonRunner[IN, OUT](
                partitionIndex: Int,
                commonTaskContext: CommonTaskContext): Iterator[OUT] = {
     val startTime = System.currentTimeMillis
+    val workerEnvVars = new java.util.HashMap[String, String](envVars)
 
     if (reuseWorker) {
-      envVars.put(str(PY_WORKER_REUSE), "1")
+      workerEnvVars.put("PY_WORKER_REUSE", "1")
+    } else {
+      workerEnvVars.remove("PY_WORKER_REUSE")
     }
     if (memoryMb.isDefined) {
-      envVars.put(str(PY_EXECUTOR_MEMORY), memoryMb.get.toString)
+      workerEnvVars.put("PY_EXECUTOR_MEMORY", memoryMb.get.toString)
     }
-    envVars.put(str(BUFFER_SIZE), bufferSize.toString)
-    val worker: Socket = PythonWorkerFactory.createPythonWorker(pythonExec, envVars.asScala.toMap, conf)
+    workerEnvVars.put("BUFFER_SIZE", bufferSize.toString)
+    val worker: Socket = PythonWorkerFactory.createPythonWorker(pythonExec, workerEnvVars.asScala.toMap, conf)
     // Whether is the worker released into idle pool or closed. When any codes try to release or
     // close a worker, they should use `releasedOrClosed.compareAndSet` to flip the state to make
     // sure there is only one winner that is going to release or close the worker.
@@ -99,19 +101,26 @@ abstract class BasePythonRunner[IN, OUT](
     // Start a thread to feed the process input from our parent's iterator
     val writerThread = newWriterThread(worker, inputIterator, partitionIndex, commonTaskContext)
 
-    commonTaskContext.pythonWorkerRegister(() => {
-      writerThread.shutdownOnTaskCompletion()
-    })(releasedOrClosed, reuseWorker, worker)
+    try {
+      commonTaskContext.pythonWorkerRegister(() => {
+        writerThread.shutdownOnTaskCompletion()
+      })(releasedOrClosed, reuseWorker, worker)
 
-    writerThread.start()
-    new MonitorThread(worker, commonTaskContext, conf).start()
+      writerThread.start()
+      new MonitorThread(worker, commonTaskContext, conf, releasedOrClosed).start()
 
-    // Return an iterator that read lines from the process's stdout
-    val stream = new DataInputStream(new BufferedInputStream(worker.getInputStream, bufferSize))
+      // Return an iterator over the worker's framed Arrow response.
+      val stream = new DataInputStream(new BufferedInputStream(worker.getInputStream, bufferSize))
 
-    val stdoutIterator = newReaderIterator(
-      stream, writerThread, startTime, worker, releasedOrClosed, commonTaskContext)
-    new InterruptibleIterator(commonTaskContext, stdoutIterator)
+      val stdoutIterator = newReaderIterator(
+        stream, writerThread, startTime, worker, releasedOrClosed, commonTaskContext)
+      new InterruptibleIterator(commonTaskContext, stdoutIterator)
+    } catch {
+      case NonFatal(e) =>
+        writerThread.interrupt()
+        if (releasedOrClosed.compareAndSet(false, true)) PythonWorkerFactory.destroyPythonWorker(worker)
+        throw e
+    }
   }
 
   protected def newWriterThread(
@@ -148,7 +157,7 @@ abstract class BasePythonRunner[IN, OUT](
 
     /** Terminates the writer thread, ignoring any exceptions that may occur due to cleanup. */
     def shutdownOnTaskCompletion() {
-      context.assertTaskIsCompleted(() => {})
+      context.assertTaskIsCompleted(() => {})()
       this.interrupt()
     }
 
@@ -164,60 +173,27 @@ abstract class BasePythonRunner[IN, OUT](
 
     override def run(): Unit = Utils.logUncaughtExceptions {
       try {
-        context.setTaskContext()
+        context.setTaskContext()()
         val stream = new BufferedOutputStream(worker.getOutputStream, bufferSize)
         val dataOut = new DataOutputStream(stream)
         // Partition index
         dataOut.writeInt(partitionIndex)
 
-        // Init a ServerSocket to accept method calls from Python side.
+        // A barrier task gets its own loopback callback socket. Ordinary tasks must
+        // not keep advertising a port opened by an earlier task on this runner.
         val isBarrier = context.isBarrier
+        val previousBarrierSocket = serverSocket
+        serverSocket = None
         if (isBarrier) {
-          serverSocket = Some(new ServerSocket(/* port */ 0,
-            /* backlog */ 1,
-            InetAddress.getByName("localhost")))
-          // A call to accept() for ServerSocket shall block infinitely.
-          serverSocket.map(_.setSoTimeout(0))
-          new Thread("accept-connections") {
-            setDaemon(true)
-
-            override def run(): Unit = {
-              while (!serverSocket.get.isClosed()) {
-                var sock: Socket = null
-                try {
-                  sock = serverSocket.get.accept()
-                  // Wait for function call from python side.
-                  sock.setSoTimeout(10000)
-                  val input = new DataInputStream(sock.getInputStream())
-                  input.readInt() match {
-                    case BarrierTaskContextMessageProtocol.BARRIER_FUNCTION =>
-                      // The barrier() function may wait infinitely, socket shall not timeout
-                      // before the function finishes.
-                      sock.setSoTimeout(0)
-                      barrierAndServe(sock)
-
-                    case _ =>
-                      val out = new DataOutputStream(new BufferedOutputStream(
-                        sock.getOutputStream))
-                      Utils.writeUTF(BarrierTaskContextMessageProtocol.ERROR_UNRECOGNIZED_FUNCTION, out)
-                  }
-                } catch {
-                  case e: SocketException if e.getMessage.contains("Socket closed") =>
-                  // It is possible that the ServerSocket is not closed, but the native socket
-                  // has already been closed, we shall catch and silently ignore this case.
-                } finally {
-                  if (sock != null) {
-                    sock.close()
-                  }
-                }
-              }
-            }
-          }.start()
-        }
-
-        // Close ServerSocket on task completion.
-        serverSocket.foreach { server =>
+          // 127.0.0.1, not "localhost": the Python client always dials IPv4 loopback.
+          val server = new ServerSocket(0, 8, InetAddress.getByAddress(Array(127, 0, 0, 1)))
+          server.setSoTimeout(0)
+          serverSocket = Some(server)
+          startBarrierAcceptLoop(server)
           context.javaSideSocketServerRegister()(server)
+        }
+        previousBarrierSocket.foreach { previous =>
+          if (!previous.isClosed) previous.close()
         }
         val boundPort: Int = serverSocket.map(_.getLocalPort).getOrElse(0)
         if (boundPort == -1) {
@@ -257,20 +233,81 @@ abstract class BasePythonRunner[IN, OUT](
     }
 
     /**
-     * Gateway to call BarrierTaskContext.barrier().
+     * BarrierTaskContext.barrier() is only present on barrier tasks. Reflect and unwrap the
+     * target exception so a SparkException is still written back on the socket.
      */
-    def barrierAndServe(sock: Socket): Unit = {
-      require(serverSocket.isDefined, "No available ServerSocket to redirect the barrier() call.")
+    private def invokeBarrier(target: Any): Unit = {
+      try {
+        target.asInstanceOf[AnyRef].getClass.getMethod("barrier").invoke(target)
+      } catch {
+        case e: java.lang.reflect.InvocationTargetException if e.getCause != null =>
+          throw e.getCause
+      }
+    }
 
+    private def startBarrierAcceptLoop(server: ServerSocket): Unit = {
+      new Thread("pyjava-barrier-accept") {
+        setDaemon(true)
+
+        override def run(): Unit = {
+          var open = true
+          while (open && !server.isClosed) {
+            var sock: Socket = null
+            try {
+              sock = server.accept()
+              sock.setTcpNoDelay(true)
+              sock.setKeepAlive(true)
+              // Only the function id has a deadline. barrier() itself may wait for the stage.
+              sock.setSoTimeout(10000)
+              serveBarrierCall(sock)
+            } catch {
+              case _: SocketTimeoutException =>
+              case e: SocketException if server.isClosed || barrierSocketClosed(e) =>
+                open = false
+              case NonFatal(e) =>
+                logWarning("Python barrier callback failed", e)
+            } finally {
+              if (sock != null) {
+                try sock.close()
+                catch { case NonFatal(_) => () }
+              }
+            }
+          }
+        }
+      }.start()
+    }
+
+    private def barrierSocketClosed(error: SocketException): Boolean = {
+      val message = Option(error.getMessage).getOrElse("").toLowerCase
+      message.contains("socket closed") || message.contains("socket is closed")
+    }
+
+    /** One UTF-8 string comes back: "success", or the text of the JVM failure. */
+    private def serveBarrierCall(sock: Socket): Unit = {
+      val input = new DataInputStream(sock.getInputStream)
       val out = new DataOutputStream(new BufferedOutputStream(sock.getOutputStream))
       try {
-        ScalaReflect.fromInstance(context.innerContext).method("barrier").invoke()
-        Utils.writeUTF(BarrierTaskContextMessageProtocol.BARRIER_RESULT_SUCCESS, out)
-      } catch {
-        case e: SparkException =>
-          Utils.writeUTF(e.getMessage, out)
+        val message = input.readInt() match {
+          case BarrierTaskContextMessageProtocol.BARRIER_FUNCTION =>
+            sock.setSoTimeout(0)
+            try {
+              invokeBarrier(context.innerContext)
+              BarrierTaskContextMessageProtocol.BARRIER_RESULT_SUCCESS
+            } catch {
+              case NonFatal(e) =>
+                logWarning("Barrier call failed", e)
+                val text = Option(e.getMessage).filter(_.nonEmpty).getOrElse(e.getClass.getName)
+                if (text == BarrierTaskContextMessageProtocol.BARRIER_RESULT_SUCCESS) "barrier failed"
+                else text
+            }
+          case _ =>
+            BarrierTaskContextMessageProtocol.ERROR_UNRECOGNIZED_FUNCTION
+        }
+        Utils.writeUTF(message, out)
+        out.flush()
       } finally {
-        out.close()
+        try out.close()
+        catch { case NonFatal(_) => () }
       }
     }
 
@@ -325,8 +362,10 @@ abstract class BasePythonRunner[IN, OUT](
     }
 
     protected def handleEndOfStream(): Unit = {
-      if (reuseWorker && releasedOrClosed.compareAndSet(false, true)) {
-        PythonWorkerFactory.releasePythonWorker(pythonExec, envVars.asScala.toMap, worker)
+      if (stream.available() > 0) throw new IOException("Unexpected data after Python worker end-of-stream")
+      if (releasedOrClosed.compareAndSet(false, true)) {
+        if (reuseWorker) PythonWorkerFactory.releasePythonWorker(pythonExec, envVars.asScala.toMap, worker)
+        else PythonWorkerFactory.destroyPythonWorker(worker)
       }
       eos = true
     }
@@ -334,34 +373,26 @@ abstract class BasePythonRunner[IN, OUT](
     protected def handleEndOfDataSection(): Unit = {
       val flag = stream.readInt()
       if (flag == SpecialLengths.END_OF_STREAM) {
-        if (reuseWorker && releasedOrClosed.compareAndSet(false, true)) {
-          PythonWorkerFactory.releasePythonWorker(pythonExec, envVars.asScala.toMap, worker)
-        }
+        handleEndOfStream()
       } else {
-        logWarning(
-          s"""
-             |-----------------------WARNING--------------------------------------------------------------------
-             |Here we should received message is SpecialLengths.END_OF_STREAM:${SpecialLengths.END_OF_STREAM}
-             |But It's now ${flag}.
-             |This may cause the **** python worker leak **** and make the ***interactive mode fails***.
-             |--------------------------------------------------------------------------------------------------
-           """.stripMargin)
+        throw new IOException(s"Invalid Python worker end-of-stream marker: $flag")
       }
       eos = true
     }
 
     protected val handleException: PartialFunction[Throwable, OUT] = {
-      case e: Exception if context.isTaskInterrupt()() =>
-        logDebug("Exception thrown after task interruption", e)
-        throw new TaskKilledException(context.getTaskKillReason()().getOrElse("unknown reason"))
-
-      case e: Exception if writerThread.exception.isDefined =>
-        logError("Python worker exited unexpectedly (crashed)", e)
-        logError("This may have been caused by a prior exception:", writerThread.exception.get)
-        throw writerThread.exception.get
-
-      case eof: EOFException =>
-        throw new SparkException("Python worker exited unexpectedly (crashed)", eof)
+      case NonFatal(e) =>
+        if (releasedOrClosed.compareAndSet(false, true)) {
+          PythonWorkerFactory.destroyPythonWorker(worker)
+        }
+        if (context.isTaskInterrupt()())
+          throw new TaskKilledException(context.getTaskKillReason()().getOrElse("unknown reason"))
+        writerThread.exception.foreach(throw _)
+        e match {
+          case eof: EOFException => throw new SparkException("Python worker exited unexpectedly (crashed)", eof)
+          case timeout: SocketTimeoutException => throw new SparkException("Timed out reading from Python worker", timeout)
+          case _ => throw e
+        }
     }
   }
 
@@ -370,7 +401,8 @@ abstract class BasePythonRunner[IN, OUT](
    * interrupts disabled. In that case we will need to explicitly kill the worker, otherwise the
    * threads can block indefinitely.
    */
-  class MonitorThread(worker: Socket, context: CommonTaskContext, conf: Map[String, String])
+  class MonitorThread(worker: Socket, context: CommonTaskContext, conf: Map[String, String],
+                      releasedOrClosed: AtomicBoolean)
     extends Thread(s"Worker Monitor for $pythonExec") {
 
     /** How long to wait before killing the python worker if a task cannot be interrupted. */
@@ -379,7 +411,15 @@ abstract class BasePythonRunner[IN, OUT](
     setDaemon(true)
 
     override def run() {
-      context.monitor(() => {})(taskKillTimeout, pythonExec, envVars.asScala.toMap, worker)
+      try {
+        while (!releasedOrClosed.get() && !context.isTaskCompleteOrInterrupt()()) Thread.sleep(200)
+        if (!releasedOrClosed.get() && context.isTaskInterrupt()()) {
+          Thread.sleep(taskKillTimeout)
+          if (context.isTaskInterrupt()()) {
+            if (releasedOrClosed.compareAndSet(false, true)) PythonWorkerFactory.destroyPythonWorker(worker)
+          }
+        }
+      } catch { case _: InterruptedException => () }
     }
   }
 
@@ -411,10 +451,9 @@ class InterruptibleIterator[+T](val context: CommonTaskContext, val delegate: It
     // is allowed. The assumption is that Thread.interrupted does not have a memory fence in read
     // (just a volatile field in C), while context.interrupted is a volatile in the JVM, which
     // introduces an expensive read fence.
-    context.killTaskIfInterrupted()
+    context.killTaskIfInterrupted()()
     delegate.hasNext
   }
 
   def next(): T = delegate.next()
 }
-
