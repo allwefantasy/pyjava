@@ -112,6 +112,24 @@ Pass these entries in the ArrowPythonRunner configuration map:
 | PYJAVA_ACCEPT_TIMEOUT_SECONDS | 300 | One-shot Python server accept deadline. |
 | python.task.killTimeout | 20000 | Delay before forcibly cancelling an interrupted task, in milliseconds. |
 
+Shared partition snapshots (`python.socket.transport=shared`, protocol
+`pyjava-arrow-snapshot/1`) are a separate listener from the one-shot socket and
+from `python.socket.detached`. The field order, budgets, lease and Ray actor
+pool are in [shared snapshot transport](shared-snapshot-transport.md). That
+pool is a bounded set of resident `RaySnapshotWorker` actors
+(`python.ray.snapshot.actors`, defaulting to `python.ray.inflight.generations`).
+It is not a TCP connection pool. `python.socket.shared.prepare.timeout.ms` is
+the deadline of each generation already submitted to those actors: Ray
+scheduling, the model transform, and materialize. It is not one deadline for
+the whole table, and it does not cover the later activate call or the read
+lease. A callback that never returns is cut off by abandoning that snapshot
+actor; the model actor is not killed, and `ray.shutdown` is not called. Legacy
+`serveToStreamWithArrow` / `readFromStreamWithArrow` and the three-column
+`host,port,server_id` result are unchanged. Timeouts and budgets below are
+milliseconds or bytes, as labeled. The server can take several sequential
+token requests on one connection. The Python fetch path still opens a new
+connection per call. There is no automatic client connection pool.
+
 For example:
 
 ```scala

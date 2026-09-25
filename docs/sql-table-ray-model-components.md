@@ -58,7 +58,7 @@ flowchart LR
 2. `Ray.distribute_execute` 导出分区地址。结果用 `dataMode=data`，不要把整表结果收进协调进程。
 3. 新的 Byzer-LLM 函数对每个分区调用 `RayContext.map_batches()`。函数里只做切批和调用已有 actor。
 4. actor 的 `apply` / `async_apply` 一次接收一批文本。embedding 走已有的 `embed_documents` 这类列表接口；摘要和分类走同一次生成接口，差别只是提示词模板。
-5. `RayDataServer` 把 Arrow 结果交给 Spark，引擎用 `SparkSocketRunner.readFromStreamWithArrow` 收成表。
+5. 结果交回 Spark。未打开 shared 时仍是 `RayDataServer` 加 `readFromStreamWithArrow`。`python.socket.transport=shared` 时，结果是九列快照描述符，引擎用 `readFromSharedSnapshot` 读，确认不再需要后用 `releaseSharedSnapshot` 释放。读一次不会自动释放。
 
 协调进程收到的输入只有分区地址。`RayContext` 在非 `directData` 时会把这些地址行读进来，这个量很小，可以留下。真正的文本必须走 `fetch_arrow_batches()`，不能走 `PythonContext.fetch_once()` 的 Pandas 转换，也不能走 `collect_as_file()` 里再次 `to_pandas()` 的路径。
 
@@ -90,9 +90,9 @@ flowchart LR
 | `UDFMaster` / `UDFWorker` | `python/pyjava/udf/__init__.py` | 要改 | Byzer-LLM 调用 `get.remote(worker_id)` 和 `async_apply.remote(...)`。这里的 `get()` 不接收 worker，空闲时 `sleep` 轮询；worker 只有同步 `apply()`。不先对齐这两个方法，常驻模型就调用不成。返回形态需要能表达一批结果，而不是只适配单行。 |
 | `UDFBuilder.build` | 同文件 | 留用 | 部署时创建 detached master。大表任务不要调用 `UDFBuilder.apply`，那个方法会 `fetch_once_as_rows()` 再 `ray.get` 一次。 |
 | `PythonWorkerFactory`、`ArrowPythonRunner` | `src/main/java/tech/mlsql/arrow/python/` | 留用 | 只给每个大表任务提供一个协调 worker。不要按行借用 worker。 |
-| `SparkSocketRunner`、`ArrowSocketServer` | `.../runner/` | 留用 | 分区导出和从 Ray 读回都走这里。detached 快照已经在 PyJava 里，等引擎传入。 |
+| `SparkSocketRunner`、`ArrowSocketServer` | `.../runner/` | 留用，共享快照是显式开关 | 旧的 `serveToStreamWithArrow` / `readFromStreamWithArrow` 和三列地址不变。大表要改用 `exportToStreamWithArrow`、`readFromSharedSnapshot`、`releaseSharedSnapshot`、`sharedSnapshotStatus`。协议 `pyjava-arrow-snapshot/1`，结果列顺序见 [共享快照](shared-snapshot-transport.md)。`python.socket.detached=true` 仍是另一条一次性文件端点，不是这条。 |
 | `PythonContext.fetch_once` | `python/pyjava/api/mlsql.py` | 不用于文本 | 它把 batch 转成 Pandas。协调进程读分区地址可以继续用；文本列不能用。 |
-| `RayContext.map_batches` | 同文件 | 留用，作为大表入口 | 要求 `dataMode=data`。它为每个 Java 分区起一个 `RayDataServer`，回调拿到的是 Arrow batch。新推理代码调用它，而不是 `collect()` 或 `to_pandas()`。 |
+| `RayContext.map_batches` | 同文件 | 留用，共享模式改了结果 actor | 要求 `dataMode=data`。未设置 `python.socket.transport=shared` 时，仍是每个输入分区一个 `RayDataServer`。设置 shared 后，一次 `setup` 只创建有界个常驻 `RaySnapshotWorker`（默认数量等于 `python.ray.inflight.generations`，默认 2），每个 actor 一个监听、多个 token。这是结果 actor 池，不是 TCP 连接池。每个已提交 generation 用 `python.socket.shared.prepare.timeout.ms` 做上限，含调度、transform 和物化，不是整表一次。回调不返回时回收这一批快照 actor 和它的目录，不杀模型 actor，也不 `ray.shutdown`。正常生成结束后 actor 仍在，快照还可读。没有 `map_batches` 的 Byzer 调用方，这条生产队列不会被标量 UDF 路径带上。 |
 | `RayContext.connect` | 同文件 | 要改调用约定 | 没有 `UDF_CLIENT` 时会先 `ray.shutdown()` 再 `init`。大表协调进程如果这样连，会拆掉本进程里的 Ray 连接。集群上 `lifetime=detached` 的模型 actor 还在，但每次任务都重连。批处理应走不再 shutdown 的连接方式。 |
 | `RayContext.fetch_arrow_batches` | 同文件 | 留用 | `map_batches` 的读取端。超时由 `PYJAVA_SOCKET_TIMEOUT_SECONDS` 控制，慢分区要单独配置，不要靠把生产 task 一直挂着。 |
 | `RayDataServer.serve` | `python/pyjava/api/serve.py` | 留用 | `func_for_batches` 已经接到 `serve_replayable`。引擎要在租期内读完；这不是失败后自动重跑模型。 |
@@ -124,7 +124,8 @@ JVM 侧版本：引擎声明 `pyjava-version=0.3.3`。Python 侧 Byzer-LLM 要�
 | Spark 分区 Arrow 服务 | `MasterSlaveInSpark` | `RayContext.fetch_arrow_batches` | 一个任务的一分区。detached 打开后，生产 task 可以先结束 |
 | Python 协调 worker | `PythonWorkerFactory`，由 `distribute_execute` 借用 | 只跑新的批处理函数 | 任务结束归还。里面没有模型权重 |
 | `UDFMaster` / `UDFWorker` | 部署阶段的 `UDFBuilder.build` | 批处理函数按批借用 | detached，跨 SQL 语句保留。卸载要显式做，不能靠 worker 池归还 |
-| `RayDataServer` | `RayContext.map_batches` | 引擎 `dataMode=data` 的读回 | 一个输出分区，读完或租约结束即退出 actor |
+| `RayDataServer` | `RayContext.map_batches` 的旧传输 | 引擎 `dataMode=data` 的旧读回 | 一个输出分区。`serve` 结束会 `exit_actor`。只在未设置 `python.socket.transport=shared` 时使用 |
+| `RaySnapshotWorker` | 同一次 `setup`，且 `python.socket.transport=shared` | 引擎用九列描述符读回 | 少量 detached actor，不是连接池。`generate` 在期限内返回后快照仍可读。租约从全部生成完成并 `activate` 起算。每个已提交 generation 的准备期限是 `python.socket.shared.prepare.timeout.ms`（调度 + transform + 物化）。超时、激活失败或协调进程被中断时，只回收这一批 actor 及其独占目录。token 清空后再空闲 `python.ray.snapshot.actor.idle.ms`（默认 60 秒）退出。不会 `ray.shutdown`，也不会结束模型 actor |
 | Spark 标量 UDF | `Ray.predict` | 短调用，大表不用 | 跟 Spark session |
 
 关联上的断点就两处：

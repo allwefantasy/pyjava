@@ -21,8 +21,11 @@ class PythonWorkerFactory(pythonExec: String, envVars: Map[String, String], conf
   private val workerModule = conf.getOrElse(PYTHON_WORKER_MODULE, "pyjava.worker")
   private val connectTimeout = positive(PYTHON_CONNECT_TIMEOUT, 10000)
   private val startupTimeout = positive(PYTHON_STARTUP_TIMEOUT, 10000)
-  private val readTimeout = conf.getOrElse(PYTHON_SOCKET_TIMEOUT, "0").toInt
-  require(readTimeout >= 0, s"$PYTHON_SOCKET_TIMEOUT must be non-negative")
+  // Worker SO_TIMEOUT is not the shared data-socket read timeout. A shared
+  // coordinator writes nothing while a generation runs; that silence stays
+  // bounded by each generation's prepare deadline, which is not a whole-table
+  // deadline and is intentionally not copied onto this socket.
+  private val readTimeout = PythonWorkerFactory.resolveWorkerReadTimeout(conf)
   private val idleTimeout = TimeUnit.MINUTES.toNanos(positive(PYTHON_WORKER_IDLE_TIME, 1))
   private val daemonWorkers = new mutable.HashMap[Socket, Int]()
   private val simpleWorkers = new mutable.HashMap[Socket, Process]()
@@ -237,7 +240,34 @@ object PythonWorkerFactory {
   private val factoryOptions = Set(PYTHON_DAEMON_MODULE, PYTHON_WORKER_MODULE,
     PYTHON_USE_DAEMON, PYTHON_WORKER_IDLE_TIME, PYTHON_WORKER_MAX_IDLE,
     PYTHON_CONNECT_TIMEOUT, PYTHON_STARTUP_TIMEOUT, PYTHON_SOCKET_TIMEOUT,
+    PYTHON_WORKER_READ_TIMEOUT, PYTHON_SOCKET_TRANSPORT,
     PYTHON_VALIDATE_TIMEOUT, REDIRECT_IMPL)
+
+  /**
+   * Socket timeout for the Python worker, in milliseconds. `0` disables it.
+   *
+   * An explicit `python.socket.worker.read.timeout` always wins. Otherwise a
+   * shared coordinator (`python.socket.transport=shared`) waits without an
+   * SO_TIMEOUT, because it produces no bytes during model generation. Legacy
+   * workers keep `python.socket.read.timeout`. Neither branch rewrites the
+   * data-socket timeout that Python receives, and neither uses
+   * `python.socket.shared.prepare.timeout.ms` as this socket's deadline.
+   */
+  def resolveWorkerReadTimeout(conf: Map[String, String]): Int = {
+    // Reject a negative data-read value even when this socket does not use it.
+    conf.get(PYTHON_SOCKET_TIMEOUT).foreach(raw => nonNegativeTimeout(PYTHON_SOCKET_TIMEOUT, raw))
+    conf.get(PYTHON_WORKER_READ_TIMEOUT) match {
+      case Some(raw) => nonNegativeTimeout(PYTHON_WORKER_READ_TIMEOUT, raw)
+      case None if conf.getOrElse(PYTHON_SOCKET_TRANSPORT, "") == "shared" => 0
+      case None => nonNegativeTimeout(PYTHON_SOCKET_TIMEOUT, conf.getOrElse(PYTHON_SOCKET_TIMEOUT, "0"))
+    }
+  }
+
+  private def nonNegativeTimeout(key: String, raw: String): Int = {
+    val value = raw.toInt
+    require(value >= 0, s"$key must be non-negative")
+    value
+  }
 
   def createPythonWorker(pythonExec: String, envVars: Map[String, String], conf: Map[String, String]): Socket = {
     val factory = synchronized {
@@ -290,6 +320,8 @@ object PythonWorkerFactory {
     val PYTHON_CONNECT_TIMEOUT = "python.connect.timeout"
     val PYTHON_STARTUP_TIMEOUT = "python.worker.startup.timeout"
     val PYTHON_SOCKET_TIMEOUT = "python.socket.read.timeout"
+    val PYTHON_WORKER_READ_TIMEOUT = "python.socket.worker.read.timeout"
+    val PYTHON_SOCKET_TRANSPORT = "python.socket.transport"
     val PYTHON_VALIDATE_TIMEOUT = "python.worker.validate.timeout"
     val PYTHON_TASK_KILL_TIMEOUT = "python.task.killTimeout"
     val REDIRECT_IMPL = "python.redirect.impl"

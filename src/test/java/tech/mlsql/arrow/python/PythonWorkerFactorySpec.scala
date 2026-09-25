@@ -37,6 +37,68 @@ class PythonWorkerFactorySpec extends AnyFunSuite with BeforeAndAfterEach {
     assert(second.getSoTimeout == 1234)
   }
 
+  test("shared transport does not put the data-read timeout on the worker socket") {
+    val sharedConf = conf + (
+      "python.socket.transport" -> "shared",
+      "python.socket.read.timeout" -> "3000",
+      "python.socket.shared.prepare.timeout.ms" -> "30000")
+    val shared = acquire(sharedConf)
+    assert(shared.getSoTimeout == 0)
+    PythonWorkerFactory.releasePythonWorker(python, env, shared)
+    val samePool = acquire(sharedConf + ("python.socket.shared.prepare.timeout.ms" -> "8000"))
+    assert(samePool eq shared)
+    assert(samePool.getSoTimeout == 0)
+    PythonWorkerFactory.releasePythonWorker(python, env, samePool)
+
+    val legacy = acquire(conf + ("python.socket.read.timeout" -> "3000"))
+    assert(legacy ne shared)
+    assert(legacy.getSoTimeout == 3000)
+  }
+
+  test("an explicit worker read timeout overrides either mode and stays inside its pool") {
+    val legacy = acquire(conf + (
+      "python.socket.read.timeout" -> "3000",
+      "python.socket.worker.read.timeout" -> "0"))
+    assert(legacy.getSoTimeout == 0)
+    PythonWorkerFactory.releasePythonWorker(python, env, legacy)
+    assert(acquire(conf + (
+      "python.socket.read.timeout" -> "3000",
+      "python.socket.worker.read.timeout" -> "0")) eq legacy)
+
+    val dataReadOnly = acquire(conf + ("python.socket.read.timeout" -> "3000"))
+    assert(dataReadOnly ne legacy)
+    assert(dataReadOnly.getSoTimeout == 3000)
+
+    val shared = acquire(conf + (
+      "python.socket.transport" -> "shared",
+      "python.socket.read.timeout" -> "3000",
+      "python.socket.worker.read.timeout" -> "2500"))
+    assert((shared ne legacy) && (shared ne dataReadOnly))
+    assert(shared.getSoTimeout == 2500)
+    val other = acquire(conf + ("python.socket.worker.read.timeout" -> "2600"))
+    assert(other ne shared)
+    assert(other.getSoTimeout == 2600)
+  }
+
+  test("negative worker and data-read timeouts are rejected and not cached") {
+    val worker = intercept[IllegalArgumentException] {
+      acquire(conf + ("python.socket.worker.read.timeout" -> "-1"))
+    }
+    assert(worker.getMessage.contains("python.socket.worker.read.timeout"))
+    val shared = intercept[IllegalArgumentException] {
+      acquire(conf + (
+        "python.socket.transport" -> "shared",
+        "python.socket.worker.read.timeout" -> "-5"))
+    }
+    assert(shared.getMessage.contains("python.socket.worker.read.timeout"))
+    val data = intercept[IllegalArgumentException] {
+      acquire(conf + ("python.socket.read.timeout" -> "-1"))
+    }
+    assert(data.getMessage.contains("python.socket.read.timeout"))
+    val recovered = acquire()
+    assert(recovered.getSoTimeout == 0)
+  }
+
   test("a closed socket is replaced and the new worker exchanges data") {
     val first = acquire()
     first.close()

@@ -94,10 +94,58 @@ class ArrowTransportSpec extends AnyFunSuite with BeforeAndAfterEach {
   }
 
   test("read timeout aborts a stuck task and the following task succeeds") {
-    intercept[Exception] {
+    val started = System.nanoTime()
+    val error = intercept[Exception] {
       run("import time\ntime.sleep(5)", options = Map("python.socket.read.timeout" -> "100"))
     }
+    assert(error.getMessage.contains("Timed out reading from Python worker"))
+    assert(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started) < 10000)
     assert(run("context.build_result([{'ok': 1}])") == Vector(Vector(1L)))
+  }
+
+  test("shared transport survives a short data-read timeout while Python is silent") {
+    val started = System.nanoTime()
+    val result = run(
+      "import time\n" +
+        "time.sleep(8)\n" +
+        "present = 1 if 'python.socket.worker.read.timeout' in context.conf else 0\n" +
+        "context.build_result([{'read_timeout': int(context.conf['python.socket.read.timeout']), 'worker_timeout_present': present}])",
+      1,
+      Map(
+        "python.socket.transport" -> "shared",
+        "python.socket.read.timeout" -> "3000",
+        "python.socket.shared.prepare.timeout.ms" -> "30000"))
+    val elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+    assert(result == Vector(Vector(3000L, 0L)))
+    assert(elapsed > 7000 && elapsed < 25000)
+  }
+
+  test("Python context still receives both timeouts when the worker timeout is explicit") {
+    val result = run(
+      "context.build_result([{'read_timeout': int(context.conf['python.socket.read.timeout']), 'worker_timeout': int(context.conf['python.socket.worker.read.timeout'])}])",
+      1,
+      Map(
+        "python.socket.read.timeout" -> "3000",
+        "python.socket.worker.read.timeout" -> "20000"))
+    assert(result == Vector(Vector(3000L, 20000L)))
+  }
+
+  test("an explicit short worker timeout fails promptly and that pool can run again") {
+    val options = Map(
+      "python.socket.transport" -> "shared",
+      "python.socket.read.timeout" -> "30000",
+      "python.socket.shared.prepare.timeout.ms" -> "30000",
+      "python.socket.worker.read.timeout" -> "1500")
+    val started = System.nanoTime()
+    val error = intercept[Exception] {
+      run("import time\ntime.sleep(20)", 1, options)
+    }
+    val elapsed = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started)
+    assert(error.getMessage.contains("Timed out reading from Python worker"))
+    assert(elapsed < 15000)
+    assert(run("context.build_result([{'ok': 1}])", 1, options) == Vector(Vector(1L)))
+    val pid = run("import os\ncontext.build_result([{'pid': os.getpid()}])", 1, options).head.head
+    assert(run("import os\ncontext.build_result([{'pid': os.getpid()}])", 1, options).head.head == pid)
   }
 
   test("standalone worker mode and disabled reuse finish the protocol cleanly") {

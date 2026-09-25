@@ -21,6 +21,28 @@ else:
     pass
 
 
+def _actor_died(exc):
+    name = type(exc).__name__
+    return name in ("RayActorError", "ActorDiedError", "WorkerCrashedError",
+                    "ActorUnavailableError")
+
+
+def _generation_failure(exc, job, prepare_ms, deadline):
+    """Keep a model exception. Add partition identity to a prepare timeout."""
+    import time
+    from pyjava.snapshot import SharedPrepareTimeout
+    if isinstance(exc, SharedPrepareTimeout):
+        return exc
+    text = str(exc)
+    timed_out = "python.socket.shared.prepare.timeout.ms" in text
+    if timed_out or (_actor_died(exc) and time.monotonic() >= deadline):
+        timeout = SharedPrepareTimeout(
+            job["partition_id"], job["attempt_id"], prepare_ms)
+        timeout.__cause__ = exc
+        return timeout
+    return exc
+
+
 class DataServer(object):
     def __init__(self, host, port, timezone):
         self.host = host
@@ -196,8 +218,26 @@ class RayContext(object):
         if "directData" not in python_context.conf:
             for item in self.python_context.fetch_once_as_rows():
                 self.server_ids_in_ray.append(str(uuid.uuid4()))
-                self.servers.append(DataServer(
-                    item["host"], int(item["port"]), item["timezone"]))
+                self.servers.append(RayContext._to_data_server(item, self.conf()))
+
+    @staticmethod
+    def _to_data_server(item, conf=None):
+        # Legacy rows are host/port/timezone only. A shared-transport job, or
+        # any row that already carries a protocol or token, must be the
+        # snapshot descriptor. Missing fields are an error, not a silent
+        # fallback onto the one-shot Arrow socket.
+        from pyjava.snapshot import PROTOCOL, SharedDataServer
+        conf = conf or {}
+        protocol = item.get("protocol")
+        token = item.get("token")
+        shared = conf.get("python.socket.transport") == "shared"
+        if shared or protocol or token:
+            if protocol != PROTOCOL or token is None or token == "":
+                raise ValueError(
+                    "shared snapshot input requires protocol %s and a token; "
+                    "refusing to fall back to the legacy socket" % PROTOCOL)
+            return SharedDataServer.from_row(item)
+        return DataServer(item["host"], int(item["port"]), item["timezone"])
 
     def data_servers(self):
         return self.servers
@@ -309,6 +349,9 @@ add comment like: `#%dataMode=data` if you are in notebook.
                 iter_all_func = ray.remote(iter_all)
                 return ray.get(iter_all_func.remote(self.mock_data))
 
+        if self.conf().get("python.socket.transport") == "shared":
+            return self._setup_shared(rayw, func_for_row, func_for_rows, func_for_batches)
+
         buffer = []
         for server_info in self.build_servers_in_ray():
             server = rayw.get_actor(server_info.server_id)
@@ -318,6 +361,235 @@ add comment like: `#%dataMode=data` if you are in notebook.
         items = [vars(server) for server in buffer]
         self.python_context.build_result(items, 1024)
         return buffer
+
+    def _setup_shared(self, rayw, func_for_row, func_for_rows, func_for_batches):
+        """Bounded resident snapshot actors. Does not call ray.shutdown.
+
+        At most ``python.ray.inflight.generations`` (default 2) generations run
+        at once. The permit is released when materialize returns, not when
+        Spark later reads. Extra partitions are not queued onto the actors.
+        Each submitted generation has its own prepare deadline, measured from
+        ``generate.remote`` and covering scheduling, transform, and materialize.
+        Leases start together after the last generation.
+        """
+        import time
+        import ray
+        from pyjava.api.serve import RaySnapshotWorker
+        from pyjava.snapshot import (
+            PROTOCOL, SharedDataServer, SharedPrepareTimeout, _conf_int,
+            identity_value, snapshot_actor_workdir)
+
+        inflight = _conf_int(self.conf(), "python.ray.inflight.generations",
+                             "PYJAVA_INFLIGHT_GENERATIONS", 2)
+        lease_ms = _conf_int(self.conf(), "python.socket.shared.lease.ms",
+                             "PYJAVA_SNAPSHOT_LEASE_MS", 30 * 60 * 1000)
+        prepare_ms = _conf_int(self.conf(), "python.socket.shared.prepare.timeout.ms",
+                               "PYJAVA_SNAPSHOT_PREPARE_MS", lease_ms)
+        raw_actors = self.conf().get("python.ray.snapshot.actors")
+        count = len(self.servers)
+        if count == 0:
+            self.python_context.build_result([], 1024)
+            return []
+        if raw_actors is None:
+            actor_count = min(count, inflight)
+        else:
+            requested = int(raw_actors)
+            if requested <= 0:
+                raise ValueError("python.ray.snapshot.actors must be positive")
+            actor_count = min(count, requested)
+        group = self.conf().get("python.ray.snapshot.group") or uuid.uuid4().hex
+        actors = []
+        names = []
+        for index in range(actor_count):
+            name = "pyjava-snapshot-%s-%d" % (group, index)
+            names.append(name)
+            # max_concurrency=2 lets abandon/shutdown run beside a stuck
+            # generate. The second slot is not a second generation.
+            actors.append(rayw.options(
+                RaySnapshotWorker, name=name, detached=True, max_concurrency=2,
+                num_cpus=0
+            ).remote(name, dict(self.conf())))
+        workdirs = [snapshot_actor_workdir(self.conf(), name) for name in names]
+        try:
+            ray.get([actor.endpoint.remote() for actor in actors], timeout=120)
+        except BaseException:
+            try:
+                self._abort_snapshot_pool(actors, set(range(actor_count)), workdirs)
+            except BaseException:
+                logging.exception("failed to clean snapshot actors after startup error")
+            raise
+
+        jobs = []
+        for index, java_server in enumerate(self.servers):
+            jobs.append({
+                "index": index,
+                "server": java_server,
+                "partition_id": identity_value(getattr(java_server, "partition_id", None), -1),
+                "attempt_id": identity_value(getattr(java_server, "attempt_id", None), -1),
+            })
+        free = list(range(actor_count))
+        pending = list(jobs)
+        running = {}
+        stuck = set()
+        results = [None] * count
+        succeeded = False
+        last_keepalive = 0.0
+
+        def submit():
+            while pending and free and len(running) < inflight:
+                slot = free.pop(0)
+                job = pending.pop(0)
+                ref = actors[slot].generate.remote(
+                    job["server"], func_for_row, func_for_rows, func_for_batches,
+                    job["partition_id"], job["attempt_id"])
+                running[ref] = (slot, job, time.monotonic() + prepare_ms / 1000.0)
+
+        def collect(done_refs):
+            failure = None
+            for ref in done_refs:
+                slot, job, deadline = running.pop(ref)
+                try:
+                    results[job["index"]] = ray.get(ref)
+                except Exception as exc:
+                    if _actor_died(exc):
+                        stuck.add(slot)
+                    else:
+                        free.append(slot)
+                    if failure is None:
+                        failure = _generation_failure(exc, job, prepare_ms, deadline)
+                else:
+                    free.append(slot)
+            return failure
+
+        try:
+            submit()
+            while running:
+                remaining = min(item[2] - time.monotonic() for item in running.values())
+                if remaining <= 0:
+                    done, _pending_refs = ray.wait(
+                        list(running.keys()), num_returns=1, timeout=0)
+                else:
+                    done, _pending_refs = ray.wait(
+                        list(running.keys()), num_returns=1,
+                        timeout=min(0.25, remaining))
+                if done:
+                    failure = collect(done)
+                    if failure is not None:
+                        raise failure
+                    submit()
+                    continue
+                now = time.monotonic()
+                overdue = [ref for ref, item in running.items() if now >= item[2]]
+                if overdue:
+                    failure = None
+                    for ref in overdue:
+                        slot, job, _deadline = running.pop(ref)
+                        stuck.add(slot)
+                        if failure is None:
+                            failure = SharedPrepareTimeout(
+                                job["partition_id"], job["attempt_id"], prepare_ms)
+                    raise failure
+                if free and now - last_keepalive >= 1.0 and remaining > 1.0:
+                    last_keepalive = now
+                    idle_actors = [actors[slot] for slot in list(free)]
+                    try:
+                        ray.wait(
+                            [actor.keepalive.remote() for actor in idle_actors],
+                            num_returns=len(idle_actors),
+                            timeout=min(0.5, remaining))
+                    except Exception:
+                        logging.exception("snapshot keepalive failed")
+            tokens = [row["token"] for row in results if row]
+            deadlines = {}
+            parts = ray.get(
+                [actor.activate.remote(tokens) for actor in actors], timeout=10)
+            for part in parts:
+                deadlines.update(part)
+            for row in results:
+                if row.get("protocol") != PROTOCOL:
+                    raise RuntimeError(
+                        "shared snapshot descriptor protocol is %s, expected %s" %
+                        (row.get("protocol"), PROTOCOL))
+                deadline = deadlines.get(row["token"])
+                if not deadline or int(deadline) <= 0:
+                    raise RuntimeError("shared snapshot lease was not activated")
+                row["lease_deadline_ms"] = int(deadline)
+                if int(row["partition_id"]) < -1 or int(row["attempt_id"]) < -1:
+                    raise RuntimeError("shared snapshot identity is invalid")
+            self.python_context.build_result(results, 1024)
+            succeeded = True
+            return [SharedDataServer.from_row(row) for row in results]
+        except BaseException:
+            for item in running.values():
+                stuck.add(item[0])
+            try:
+                self._abort_snapshot_pool(actors, stuck, workdirs)
+            except BaseException:
+                logging.exception("snapshot pool cleanup failed")
+            raise
+        finally:
+            if succeeded:
+                self._arm_snapshot_idle(actors)
+
+    def _abort_snapshot_pool(self, actors, stuck, workdirs):
+        """Drop this setup's actors and their snapshot directories.
+
+        Does not call ``ray.shutdown`` and does not touch any other actor.
+        A stuck ``generate`` is not asked to run ``shutdown`` on the same
+        concurrency slot; ``abandon`` runs beside it, then ``ray.kill``.
+        """
+        import shutil
+        import ray
+        stuck = {slot for slot in stuck if isinstance(slot, int) and 0 <= slot < len(actors)}
+        try:
+            refs = []
+            for slot in stuck:
+                try:
+                    refs.append(actors[slot].abandon.remote())
+                except Exception:
+                    logging.exception("failed to schedule snapshot abandon")
+            if refs:
+                try:
+                    ray.wait(refs, num_returns=len(refs), timeout=2)
+                except BaseException:
+                    logging.exception("snapshot abandon wait failed")
+        finally:
+            for path in workdirs or []:
+                shutil.rmtree(path, ignore_errors=True)
+            for slot in stuck:
+                self._kill_snapshot_actor(actors[slot])
+            idle = [actor for index, actor in enumerate(actors) if index not in stuck]
+            self._shutdown_or_kill(idle)
+            for path in workdirs or []:
+                shutil.rmtree(path, ignore_errors=True)
+
+    def _shutdown_or_kill(self, actors):
+        import ray
+        if not actors:
+            return
+        try:
+            ray.get([actor.shutdown.remote() for actor in actors], timeout=5)
+        except BaseException as exc:
+            # exit_actor() makes the shutdown RPC look like the worker died.
+            if _actor_died(exc):
+                return
+            logging.exception("snapshot shutdown failed; killing these actors")
+            for actor in actors:
+                self._kill_snapshot_actor(actor)
+
+    def _kill_snapshot_actor(self, actor):
+        import ray
+        try:
+            ray.kill(actor, no_restart=True)
+        except Exception:
+            logging.exception("ray.kill snapshot actor failed")
+
+    def _arm_snapshot_idle(self, actors):
+        import ray
+        try:
+            ray.get([actor.enable_idle.remote() for actor in actors], timeout=5)
+        except Exception:
+            logging.exception("failed to arm snapshot actor idle TTL")
 
     def foreach(self, func_for_row):
         return self.setup(func_for_row)
@@ -331,7 +603,7 @@ add comment like: `#%dataMode=data` if you are in notebook.
 
     def collect(self):
         for shard in self.data_servers():
-            for row in RayContext.fetch_once_as_rows(shard):
+            for row in RayContext.fetch_once_as_rows(shard, self.conf()):
                 yield row
 
     def fetch_as_dir(self, target_dir, servers=None):
@@ -361,14 +633,8 @@ add comment like: `#%dataMode=data` if you are in notebook.
 
         def inner_fetch():
             for data_server in data_servers:
-                with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-                    out_ser = ArrowStreamSerializer()
-                    buffer_size = utils.configure_transfer_socket(sock)
-                    sock.connect((data_server.host, data_server.port))
-                    infile = os.fdopen(os.dup(sock.fileno()), "rb", buffer_size)
-                    result = out_ser.load_stream(infile)
-                    for batch in result:
-                        yield batch
+                for batch in RayContext.fetch_arrow_batches(data_server):
+                    yield batch
 
         def gen_by_batch():
             import numpy as np
@@ -401,9 +667,9 @@ add comment like: `#%dataMode=data` if you are in notebook.
                                                    batch_size)
 
     @staticmethod
-    def collect_from(servers):
+    def collect_from(servers, conf=None):
         for shard in servers:
-            for row in RayContext.fetch_once_as_rows(shard):
+            for row in RayContext.fetch_once_as_rows(shard, conf):
                 yield row
 
     def to_pandas(self):
@@ -411,17 +677,27 @@ add comment like: `#%dataMode=data` if you are in notebook.
         return pd.DataFrame(data=items)
 
     @staticmethod
-    def fetch_once_as_rows(data_server):
+    def fetch_once_as_rows(data_server, conf=None):
         # Converting nullable int64 through pandas would round values above 2**53.
         from pyjava.transfer import arrow_rows
-        for batch in RayContext.fetch_arrow_batches(data_server):
+        for batch in RayContext.fetch_arrow_batches(data_server, conf):
             yield from arrow_rows(batch)
 
     @staticmethod
-    def fetch_arrow_batches(data_server):
-        """Stream typed Arrow batches; the caller must close an abandoned generator."""
+    def fetch_arrow_batches(data_server, conf=None):
+        """Stream typed Arrow batches; the caller must close an abandoned generator.
+
+        SharedDataServer descriptors use the shared snapshot protocol; legacy
+        DataServer keeps the raw Arrow stream behaviour.
+        """
         import pyarrow as pa
+        from pyjava.snapshot import PROTOCOL, fetch_shared_arrow_batches
         from pyjava.transfer import StrictArrowInput, positive_env
+        if getattr(data_server, "protocol", "") == PROTOCOL and \
+                getattr(data_server, "token", None):
+            for batch in fetch_shared_arrow_batches(data_server, conf):
+                yield batch
+            return
         timeout = positive_env("PYJAVA_SOCKET_TIMEOUT_SECONDS", 300)
         with socket.create_connection((data_server.host, data_server.port), timeout=10) as sock:
             buffer_size = utils.configure_transfer_socket(sock)
@@ -431,6 +707,6 @@ add comment like: `#%dataMode=data` if you are in notebook.
                     yield from reader
 
     @staticmethod
-    def fetch_data_from_single_data_server(data_server):
-        for batch in RayContext.fetch_arrow_batches(data_server):
+    def fetch_data_from_single_data_server(data_server, conf=None):
+        for batch in RayContext.fetch_arrow_batches(data_server, conf):
             yield batch.to_pandas()
